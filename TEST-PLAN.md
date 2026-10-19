@@ -1,34 +1,24 @@
-# G06-NPC Notes: Foundry v14 live test plan
+# G06-NPC Notes - v0.3.0 Foundry v14 live test plan
 
-**Target build:** AFT NPC Notes 0.2.1 beta, module ID `player-npc-notes`.  
-**Status:** None of these live steps have yet been performed. Automated/mock tests are not a substitute.
+**Status:** Not yet executed in Foundry. Automation uses Node.js mocks, not a real running world.
 
-In a backed-up test world, use one GM and at least two ordinary players. Record exact Foundry, system and module versions, scene, date and pass/fail for each step.
+Use a test world or a recoverable copy with **one connected GM** and **two separate player clients** (Alice and Bob). Record actual Foundry/core/system versions, the module's installed version, testing date and pass/fail outcomes. If possible repeat the same scenario separately in D&D 5e, PF2e and WoD20; do not assume successful operation in one system proves the others.
 
-1. **Install:** Install from the published manifest, enable it in the world, and reload GM/player clients. Verify title, version, no console errors and no changed Actor/Journals.
-2. **NPC with zero Actor permission:** Set an NPC Actor's default/player access to **NONE**, place a visible token, and confirm a player cannot open its sheet or inspect statistics. Hover over that token and confirm a clickable book icon appears **on its upper-left side** **without** granting Actor ownership.
-3. **First party note:** Player clicks book with the GM online. Confirm exactly one editable native Journal opens, with its actual linked Actor name (or unlinked Token name and Scene), one `Notes` text page, and its association flag pointing to the correct Actor/Token UUID. Confirm no Actor updates.
-4. **Collaboration:** Player A enters a note; Player B opens the same visible NPC and can read/edit it. GM can read it. Confirm the Journal has a separate ownership model from the Actor.
-5. **Personal notes:** Right-click the hover book and enter a private note as Player A. Player B must not see it from the Journal directory, UUID direct link or token; a GM may read it. Personal/party content must stay separate.
-6. **Legacy Journals:** Use a test copy of a v0.1.1 module-generated shared Journal accessible only to A. Upgrade and confirm its text and flags are unchanged and Player B is **not** automatically granted permission. Manually grant B Journal Owner and reopen, without altering the NPC Actor.
-7. **Visibility:** Verify no hover icon for a token hidden from a player, not visible through current vision or on a different Scene. Try moving away/panning/zooming and confirm the icon follows correctly, disappears promptly and cannot be clicked after it becomes hidden.
-8. **Linked/unlinked identity:** Put one linked NPC Actor on two Scenes and verify the same Journal UUID link; put two unlinked token copies of one template on one Scene and verify they get separate Journals.
-9. **Normal HUD:** As GM or token owner, right-click token and confirm native HUD shows the book **in the left column** once; all normal controls still work. A player without token ownership need not see the normal HUD, but must still see the hover shortcut.
-10. **GM offline:** After Journals have been created, disconnect the GM and confirm existing notes still open for permitted players. First-time note creation should give an explanatory error rather than a damaged Journal.
-11. **Concurrent first clicks:** A and B create/open notes almost simultaneously. Confirm a single shared Journal and no duplicate entries or unexpected permissions.
-12. **Persistence/rollback:** Reload all clients, disable G06, and confirm Journals remain normal Foundry world documents. Restore code from saved v0.2.0 folder if needed. World text, Journal title, and ownership changes require the matching world snapshot to undo.
-13. **Cross-system:** Repeat the NPC token visibility/HUD, party Journal, privacy, and linked/unlinked tests under actual installed D&D 5e (`dnd5e`), PF2e (`pf2e`) and WoD20 (`worldofdarkness`). Record per-system compatibility independently.
+1. **Backup/install:** Save original `Data/modules/player-npc-notes` and an independent Foundry world Journal backup. Install v0.3.0 by manifest; enable it in Manage Modules. Confirm manifest ID `player-npc-notes` and version `0.3.0`. Open console and check for startup errors.
+2. **Token hover/menu:** Place an NPC whose Actor ownership for Alice is **None**, with a visible token on Alice's current scene. Hover the token: book appears at **upper-left**. Left-click displays **Party Notes** and **My Notes**, not immediate creation. Cancel makes no new Journal.
+3. **First party page:** Choose Party Notes with GM online. Journal Directory gains folder `AFT NPC Notes`, Journal `Party - Recurring NPCs` (displayed with em dash), and a page named for the Actor. The specific page opens in Foundry's native editor. Alice can write and save text without seeing the Actor stat sheet.
+4. **Second linked NPC:** Repeat with a second linked world Actor. A *second page* appears in the same party Journal, not a second Journal. Return to first token; its original page opens with content retained.
+5. **Unlinked tokens:** Place two distinct unlinked tokens, including two with identical displayed names if convenient. Both create separate pages in the single `Party - Scene NPCs` Journal. Page titles use `Token Name [seen in Scene Name]`. Confirm each UUID points to its own page.
+6. **Two-player party editing:** Bob opens a token Alice previously annotated, sees her note, adds text and saves; Alice sees that change. Inspect that `default: Owner` grants Bob and future player accounts access to all shared pages (intended behavior).
+7. **Personal note via chooser:** Alice selects **My Notes** for a linked Actor and for an unlinked token. She gets two separate private Journals. Bob cannot browse them in the Journal sidebar or open them by known Journal/Page UUID; GM can read both. Bob creates his own pair, not Alice's.
+8. **Right-click shortcut:** Right-click the same token's hover book and later the native Token HUD book. Both should open Alice's personal page directly, without showing the choice dialog. Left-click still shows choice. No duplicate controls after rerenders.
+9. **New-player rights:** Create a third test player after the shared Journals exist. Verify the new player can edit both shared Journals but cannot access Alice/Bob private Journals. Confirm this matches Foundry's actual default Journal permission behavior.
+10. **GM disconnected:** With existing pages, disconnect the GM. Alice and Bob should still open and edit their authorized pages. Attempt first-time creation of a *new* NPC page; the module should give a clear GM-online error, without a broken or duplicate page.
+11. **Protection/visibility:** Try hidden/invisible tokens and tokens on another scene. Neither should expose a hover shortcut or allow first-time page creation. Verify ordinary NPC Actor permissions/stats are unchanged. Check an Actor's name is intentionally used for recurring page labels and decide if any secret name needs a player-safe alias before play.
+12. **Preserve old Journals:** Add an old v0.2.1 module-created `noteLink` Journal (or use an existing one in the test copy). Opening the corresponding NPC should create/use a new page in the consolidated Journal. The old Journal must remain untouched with original HTML, pages, ID, flags and ownership. **Do not delete** until backup and review.
+13. **Concurrency/refresh:** Alice and Bob click first-note for the same NPC nearly simultaneously; only one page should result. Reload both browsers and verify page navigation and persisted text. Disable/re-enable the module and verify native Journals remain present.
+14. **Optional system matrix:** Run the core scenario with the actual installed `dnd5e`, `pf2e` and `worldofdarkness` system versions. Record Token HUD/Actor sheet deviations without changing game-system-specific files here.
 
-Do not mark a system live-compatible until its player/GM workflow actually passes in the specified build.
+**Release gate:** Tests 1-13 plus GM/two-player privacy must be recorded as passed before declaring live Foundry v14 compatibility. Repeat system matrix before claiming tested compatibility with each system.
 
-## v0.2.1 names and preservation regression
-
-- **Linked:** Actor name `Detective Marcus Reed` -> `Detective Marcus Reed - Party Notes`. A second linked Token on another scene reopens the exact same Journal UUID.
-- **Unlinked:** Token named `Desk Sergeant`, Scene `Downtown Precinct` -> `Desk Sergeant [seen in Downtown Precinct] - Party Notes`. A different Token instance on another Scene has its own Journal identity.
-- **Old generated title:** Reopen an existing v0.2.0 Journal `NPC <last six characters of UUID> - Party Notes` with a GM online. Only `JournalEntry.name` should change; compare Journal ID, pages, note text, flags and ownership before/after. The operation is on-demand for that Journal, not a bulk rename.
-- **Custom title:** If a party member previously renamed the Journal manually, reopening it must leave that title alone.
-- **Offline:** With all GMs offline, an existing generic-titled Journal must still open even if its title cannot be corrected.
-- **Privacy:** Validate that linked Actor names, including potential hidden identities, are deliberately acceptable to publish to the party. No Actor statistics or biography should be transmitted by this module.
-- **Position:** Test the left-side hover position while panning, zooming and using the native HUD; verify no duplicate buttons or blocked token controls.
-
-Back up the world's Journals and the existing module before upgrading. Reverting the module code alone does not reverse a corrected Journal title.
+**Rollback:** Restore the previous complete module folder/source ZIP after disabling and stopping Foundry. This reverses code only. New Journal pages, text and ownership remain in world data; restore the matching Journal/world backup to reverse those changes. No legacy migration or automatic cleanup exists in this release.

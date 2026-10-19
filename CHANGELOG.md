@@ -1,64 +1,45 @@
-# Changelog
+# Changelog - AFT NPC Notes
 
-## 0.2.1 - 2026-10-18 (beta, live verification pending)
+## 0.3.0 - 2026-10-18 (beta, live unverified)
 
-- Linked NPC notes now use the **Actor name** rather than the short internal UUID identifier: e.g., `Detective Marcus Reed - Party Notes`.
-- Unlinked NPC notes now use the **Token name plus the Scene where it was seen**: e.g., `Desk Sergeant [seen in Downtown Precinct] - Party Notes`.
-- Moved the hover book to the **upper-left side** of visible tokens, and the native Token HUD book to the left control column.
-- On reopening a v0.2.0 note with a generated short-UUID title, an online GM can correct **that one Journal name**. Exact preexisting UUID-generated titles are eligible; user-customized titles are never changed. No automatic bulk rename occurs. Existing note pages, IDs, links, flags and permissions remain intact. With no GM online, the old note still opens.
-- **GM privacy caution:** Linked Actor names now appear in shared player-owned Journal titles. An internal Actor name intended to remain secret may be disclosed. No Actor stats or biography are copied.
-- Retained module ID `player-npc-notes`, manifest URL, Journal association scheme, token visibility checks and party/personal permission rules.
-- Automated/mock tests: 43 passing under Node.js 22; JS syntax checks passed. Real Foundry v14, D&D 5e, PF2e and WoD20 tests not run for this build.
-- Back up the installed module folder and the world's Journals before updating; code rollback alone will not revert a native Journal title change.
+### Players
+- Left-click the book on the upper-left side of a visible NPC token to choose **Party Notes** or **My Notes**. Right-click still opens **My Notes** directly.
+- NPC notes now use **one page per UUID** inside consolidated native Journals, instead of one Journal per NPC.
+- Party notes live in **Party - Recurring NPCs** (linked world Actor UUIDs) and **Party - Scene NPCs** (unlinked placed Token UUIDs).
+- Each player gets a private **Recurring NPCs** and **Scene NPCs** Journal as needed; personal pages are separate from shared pages.
+- Clicking an NPC opens that NPC's exact page, using the Foundry v14 Journal page-navigation API.
 
-## 0.2.0 - 2026-10-18 (beta, live verification pending)
+### Permission and data behavior
+- New party Journals use `default: Owner` for automatic access by existing and future world players. Everyone with Journal access can browse and edit all its pages. New personal Journals use `default: None`, explicit Owner only for the intended player; GMs retain normal access.
+- Page access inherits the containing Journal's permissions; no page-specific ACLs or GM approval workflow.
+- GM-mediated first page creation reuses the confirmed two-way user query and scene/visibility checks; subsequent openings do not require GM presence.
+- New `collectionLink` flags on Journal Entries and `pageLink` flags on Pages (schema 2). A linked Actor UUID persists across scenes; an unlinked Token UUID identifies one token instance.
+- Old `noteLink` schema-1 Journals are ignored, **not migrated, deleted, copied, renamed or edited**. No automatic legacy cleanup. Existing notes remain in the world and can be reviewed/deleted manually after backup.
+- Existing module ID and manifest URL are unchanged. NPC Actor/Token/Scene documents, owned macros/hotbars, and other Journals are never written by the module.
 
-- Added a hover book shortcut on visible NPC tokens, including tokens players do not own. Left-click opens Party Notes; right-click opens personal notes. The existing owner/GM Token HUD button remains available.
-- Journals remain linked by Actor UUID for linked tokens and placed Token UUID for unlinked tokens. Previous `noteLink` flags and existing notes are retained without migration.
-- No Actor permission is needed for the token shortcut. New party Journals receive their own explicit Player Journal Owner access; private Journals retain author-only plus GM access. Actor sheets/statistics remain unchanged.
-- Existing Journals keep their exact permissions: automatic Actor-to-Journal permission synchronization from previous releases is removed. GMs can adjust Journal ownership manually where needed, avoiding silent disclosure of prior notes.
-- GM-side first-create requests validate a same-scene Token UUID and the player's reciprocal client-visible token confirmation. Hidden, out-of-scene and no-visibility UI cases are refused.
-- New shared Journals use generic titles to avoid revealing GM-only Actor names. The party can rename its own notes to an identified NPC name.
-- Preserved the unchanged Foundry module ID (`player-npc-notes`), manifest URL, folder flag, Journal note flags, Actor-sheet compatibility, existing personal notes and all user content.
-- Node.js 22: 35 automated/mock tests pass; syntax checks pass. **No live Foundry v14, D&D 5e, PF2e or WoD20 tests have been run.** The hover control and GM/player permissions must be checked in a test world.
-- Back up both your module folder and world Journals before upgrading. For rollback, restore the previous full module folder/ZIP. Code rollback alone does not reverse native Journal edits or permissions.
+### Testing
+- 49 automated/mock Node tests pass (storage, duplicates, privacy, token/scene checks, chooser, navigation and old-document preservation); JS syntax checks pass. **No live Foundry v14 GM/two-player test has run**, and D&D 5e/PF2e/WoD20 system compatibility remains unverified.
 
+### Before updating
+- Back up the existing module folder and Foundry world Journals.
+- New pages do not point at old per-NPC note content; older Journals must be accessed from the sidebar. Do not delete them until you review their contents.
+- Restoring older module source leaves new Journals in the world but old code cannot open their pages from a token. Restore matching world backup to revert content changes.
 
-## 0.1.1 - 2026-10-18 (beta, not live-verified)
+## 0.2.1 - 2026-10-18 (beta)
+- Linked Actor titles use their Actor name; unlinked Token titles use Token name and scene.
+- Hover book moved to the token's upper-left; native HUD control moved left.
+- Old short-UUID-generated Journal titles may be corrected on access by GM, custom titles preserved.
+- Automated/mock-tested only; no live system verification.
 
-- Displayed module name changed to **AFT NPC Notes**. Internal component name is **G06-NPC Notes**.
-- New note Journal folders and the Token HUD tooltip use the updated name. Existing module-created folders and Journal notes remain unchanged and continue to be reused by their flags.
-- Unchanged module ID `player-npc-notes`, native Journal association flags, Actor permission requirements, and manifest URL. This is a name-only release, not a new permission model.
-- Automated/mock tests and syntax checks rerun for v0.1.1; live Foundry v14, D&D 5e, PF2e and WoD20 verification remains pending.
-- Upgrade with the same Foundry manifest. Back up the module and world Journals before testing; the previous v0.1.0 ZIP is retained for rollback.
+## 0.2.0 - 2026-10-18 (beta)
+- Visible-token notes shortcut without Actor sheet permissions; left-click party, right-click personal.
+- UUID identity for linked/unlinked tokens; player/GM two-way creation confirmation.
+- Existing Journal permissions left unchanged; no NPC Actor writes.
 
+## 0.1.1 - 2026-10-18 (beta)
+- Renamed user-visible module to AFT NPC Notes, with internal name G06-NPC Notes.
+- Preserved `player-npc-notes` ID and original manifest.
 
-## 0.1.0 - 2026-10-18 (beta, not live-verified)
-
-### Added
-- A Player Notes action for supported Actor-sheet headers and Token HUDs.
-- Native Foundry party Journals linked to a world Actor or individual unlinked Token UUID.
-- Personal Journals restricted to one player plus GMs.
-- GM-proxied first Journal creation using Foundry v14 User queries and a verified reciprocal pending-request handshake; no broad player Journal-create permission required.
-- Deduplication, one managed Journal folder, and permission reconciliation for module-owned party notes.
-- Optional `api.open`, `api.openShared`, `api.openPersonal` helpers.
-
-### Preserved
-- Existing Actor/Token values, flags, ownership, item data and game-system sheets.
-- All ordinary Journals and previously entered note content. No import, mass adoption or data migration.
-
-### Compatibility and limitations
-- Designed for Foundry v14 and not tied to a game-system schema. **Live** D&D 5e, PF2e and WoD20 compatibility is pending.
-- Actor Limited permission is required; the sheet-specific content that Limited reveals depends on the system.
-- First Journal creation requires a connected GM; existing notes can be edited without one.
-- Unlinked tokens keep separate instance notes; orphan notes are not deleted.
-- The repository provides a manifest and versioned ZIP; no GitHub Release asset or official Foundry listing is claimed. No open-source license is assigned.
-
-### Verification
-- Syntax checks: passed, Node.js 22.
-- 28 local mock/automated tests: passed.
-- Live Foundry/GM/player/two-client checks: **not run**.
-
-### Install/rollback
-- Foundry manifest `https://raw.githubusercontent.com/rebsiot/NPC-Notes/main/module.json` installs the full module ZIP. Back up the existing module folder and world Journals beforehand.
-- Restore the previous ZIP for a code rollback. Journal data persists unless the backed-up world data is explicitly restored.
+## 0.1.0 - 2026-10-18 (beta)
+- Initial Journal-based shared and private notes linked to NPC Actor/Token UUIDs.
+- Actor-sheet and Token HUD shortcuts; GM-mediated Journal creation.

@@ -1,259 +1,298 @@
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 import {
-  MODULE_ID, subjectUuidForActor, subjectUuidForToken, resolveSubject,
-  playerMayNote, isValidScope, journalKey, findJournal, buildOwnership,
-  ensureJournal, journalTitle, isLegacyGeneratedTitle
+  MODULE_ID, COLLECTION_FLAG, PAGE_FLAG, SCHEMA,
+  subjectUuidForActor, subjectUuidForToken, resolveSubject, playerMayNote,
+  isValidScope, kindForUuid, collectionKey, collectionName, pageName,
+  collectionOwnership, findCollection, findPage, ensureCollection, ensurePage
 } from "../scripts/store.mjs";
 
-let actors, users, journal, folders, created, updated, folderCreations, actorWrites;
-function user(id, { isGM = false, role = 1 } = {}) {
-  return { id, name: `User ${id}`, isGM, role };
+let users, journals, folders, actors, created, createdPages, journalUpdates, actorWrites;
+function makeUser(id, { isGM = false, role = 1, name = id } = {}) {
+  return { id, name, isGM, role };
 }
-function actor(id, accessible = []) {
-  const obj = {
-    id, name: `Secret Actor ${id}`, documentName: "Actor", uuid: `Actor.${id}`,
-    accessible: new Set(accessible),
-    testUserPermission: u => u.isGM || obj.accessible.has(u.id),
-    async update() { actorWrites++; throw new Error("Actor must never be updated"); }
+function makeActor(id, allowed = []) {
+  const actor = {
+    id, name: `Secret ${id}`, uuid: `Actor.${id}`, documentName: "Actor",
+    allowed: new Set(allowed),
+    testUserPermission: u => u.isGM || actor.allowed.has(u.id),
+    async update() { actorWrites++; throw new Error("Never write to Actors"); }
   };
-  return obj;
+  actors.set(actor.uuid, actor);
+  return actor;
+}
+function makePage(data, entry) {
+  const page = {
+    id: `p${createdPages.length + 1}`, ...data,
+    parent: entry, getFlag: (ns, key) => page.flags?.[ns]?.[key]
+  };
+  createdPages.push(page);
+  return page;
 }
 function fakeJournal(data) {
   const entry = {
-    id: `j${journal.length + 1}`, ...data,
-    getFlag: (scope, key) => data.flags?.[scope]?.[key],
-    testUserPermission: u => u.isGM || (entry.ownership[u.id] ?? entry.ownership.default) === 3,
-    async update(change) { updated.push({ id: entry.id, change }); Object.assign(entry, change); },
-    sheet: { render() {} }
+    id: `j${journals.length + 1}`, ...data,
+    pages: [],
+    getFlag: (ns, key) => entry.flags?.[ns]?.[key],
+    testUserPermission: (user, level) => user.isGM ||
+      (entry.ownership[user.id] ?? entry.ownership.default) >= (level === "OWNER" ? 3 : 1),
+    async createEmbeddedDocuments(type, data) {
+      assert.equal(type, "JournalEntryPage");
+      const pages = data.map(item => makePage(item, entry));
+      entry.pages.push(...pages);
+      return pages;
+    },
+    async update(change) { journalUpdates.push(change); Object.assign(entry, change); },
+    sheet: { render() {}, goToPage() {} }
   };
-  journal.push(entry);
+  entry.pages.push(...(data.pages || []));
+  entry.pages.get = id => entry.pages.find(p => p.id === id);
+  journals.push(entry);
   return entry;
 }
 beforeEach(() => {
-  actors = new Map();
-  users = [user("gm", {isGM:true,role:4}),user("playerA"),user("playerB"),user("visitor", {role:0})];
-  journal = []; folders = []; created = []; updated = [];
-  actorWrites = 0; folderCreations = 0;
-  const userCollection = {
-    [Symbol.iterator]: () => users[Symbol.iterator](),
-    get: id => users.find(u => u.id === id),
-    get activeGM() { return users[0]; }
-  };
-  globalThis.game = { user: users[0], users:userCollection, journal, folders };
-  globalThis.CONST = {
-    DOCUMENT_OWNERSHIP_LEVELS: { NONE:0, LIMITED:1, OBSERVER:2, OWNER:3 },
-    JOURNAL_ENTRY_PAGE_FORMATS: { HTML:1 }
-  };
-  globalThis.Folder = { implementation: {
-    create: async data => {
-      folderCreations++;
-      const f = { ...data, id:"folderA", getFlag:(scope,key)=>data.flags?.[scope]?.[key] };
-      folders.push(f); return f;
-    }
-  }};
-  globalThis.JournalEntry = { implementation: {
-    create: async data => { created.push(data); return fakeJournal(data); }
-  }};
-  globalThis.fromUuid = async uuid => actors.get(uuid) ?? null;
+  users = [makeUser("gm", { isGM: true, role: 4, name: "GM" }),
+    makeUser("a", { name: "Alice" }), makeUser("b", { name: "Bob" })];
+  journals = []; journals.get = id => journals.find(j => j.id === id);
+  folders = []; actors = new Map(); created = []; createdPages = []; journalUpdates = []; actorWrites = 0;
+  globalThis.game = { user: users[0],
+    users: { get: id => users.find(u => u.id === id), [Symbol.iterator]: () => users[Symbol.iterator]() },
+    journal: journals, folders };
+  globalThis.CONST = { DOCUMENT_OWNERSHIP_LEVELS: { NONE: 0, OWNER: 3 },
+    JOURNAL_ENTRY_PAGE_FORMATS: { HTML: 1 } };
+  globalThis.Folder = { implementation: { create: async data => {
+    const folder = { id: "folder1", ...data, getFlag: (ns, k) => data.flags?.[ns]?.[k] };
+    folders.push(folder); return folder;
+  } } };
+  globalThis.JournalEntry = { implementation: { create: async data => {
+    created.push(data); return fakeJournal(data);
+  } } };
+  globalThis.fromUuid = async id => actors.get(id) ?? null;
 });
 
-test("world Actors keep Actor UUID and unlinked synthetic Actors keep Token UUID", () => {
-  const a = actor("foo");
-  assert.equal(subjectUuidForActor(a), "Actor.foo");
-  a.token = { actorLink:false, uuid:"Scene.scA.Token.tokA" };
-  assert.equal(subjectUuidForActor(a), "Scene.scA.Token.tokA");
-  a.token.actorLink = true;
-  assert.equal(subjectUuidForActor(a), "Actor.foo");
-  assert.equal(subjectUuidForActor({documentName:"Item"}),null);
-});
-
-test("Token UUID shortcut uses Actor UUID for linked and Token UUID for unlinked", () => {
-  const doc = {
-    documentName:"Token", uuid:"Scene.scA.Token.tokA", actorLink:true, actorId:"foo"
-  };
-  assert.equal(subjectUuidForToken(doc), "Actor.foo");
-  assert.equal(subjectUuidForToken({document:doc}), "Actor.foo");
+test("UUID parsing distinguishes recurring Actors and per-scene unlinked Tokens", () => {
+  const actor = makeActor("npc");
+  assert.equal(subjectUuidForActor(actor), "Actor.npc");
+  assert.equal(subjectUuidForActor({ documentName: "Item" }), null);
+  actor.token = { actorLink: false, uuid: "Scene.map.Token.t1" };
+  assert.equal(subjectUuidForActor(actor), "Scene.map.Token.t1");
+  const doc = { documentName: "Token", uuid: "Scene.map.Token.t1", actorLink: true, actorId: "npc" };
+  assert.equal(subjectUuidForToken(doc), "Actor.npc");
+  assert.equal(subjectUuidForToken({ document: doc }), "Actor.npc");
   doc.actorLink = false;
-  assert.equal(subjectUuidForToken(doc), "Scene.scA.Token.tokA");
+  assert.equal(subjectUuidForToken(doc), "Scene.map.Token.t1");
   doc.actorLink = true; doc.actorId = "bad id";
   assert.equal(subjectUuidForToken(doc), null);
-  assert.equal(subjectUuidForToken({documentName:"Actor",uuid:"Actor.foo"}),null);
+  assert.equal(kindForUuid("Actor.npc"), "recurring");
+  assert.equal(kindForUuid("Scene.map.Token.t1"), "scene");
+  assert.equal(kindForUuid("Compendium.foo.Actor.npc"), null);
+  assert.equal(kindForUuid("Scene.map.Token.t1.Actor.npc"), null);
 });
 
-test("resolution accepts only saved world Actor or placed Token UUIDs", async () => {
-  const a = actor("foo"); actors.set(a.uuid,a);
-  const doc = {documentName:"Token",id:"tokA",parent:{documentName:"Scene",id:"scA"},actor:a};
-  actors.set("Scene.scA.Token.tokA",doc);
-  assert.deepEqual(await resolveSubject(a.uuid),{actor:a,subjectUuid:a.uuid});
-  assert.deepEqual(await resolveSubject("Scene.scA.Token.tokA"),{
-    actor:a,token:doc,subjectUuid:"Scene.scA.Token.tokA",sceneId:"scA"
-  });
-  assert.equal(await resolveSubject("Compendium.foo.Actor.a"),null);
-  assert.equal(await resolveSubject("Actor.unknown"),null);
-  assert.equal(await resolveSubject("Scene.scA.Token.foo.Actor.bar"),null);
-  a.inCompendium=true;
-  assert.equal(await resolveSubject(a.uuid),null);
+test("only saved world Actors and placed Token documents resolve", async () => {
+  const actor = makeActor("npc");
+  const token = { documentName: "Token", uuid: "Scene.map.Token.t1", name: "Guard",
+    parent: { documentName: "Scene", id: "map", name: "Warehouse" }, actor };
+  actors.set(token.uuid, token);
+  assert.deepEqual(await resolveSubject(actor.uuid), { actor, subjectUuid: actor.uuid });
+  assert.deepEqual(await resolveSubject(token.uuid),
+    { actor, token, subjectUuid: token.uuid, sceneId: "map" });
+  assert.equal(await resolveSubject("Actor.gone"), null);
+  assert.equal(await resolveSubject("Scene.map.Token.t2"), null);
+  actor.inCompendium = true;
+  assert.equal(await resolveSubject(actor.uuid), null);
+  assert.equal(await resolveSubject("Actor." + "x".repeat(300)), null);
 });
 
-test("Actor LIMITED checking remains only for sheet compatibility", () => {
-  const a = actor("foo",["playerA"]);
-  assert.equal(playerMayNote(a,users[1]),true);
-  assert.equal(playerMayNote(a,users[2]),false);
-  assert.equal(playerMayNote(a,users[0]),true);
+test("sheet visibility remains limited to Actor permissions", () => {
+  const actor = makeActor("npc", ["a"]);
+  assert.equal(playerMayNote(actor, users[1]), true);
+  assert.equal(playerMayNote(actor, users[2]), false);
+  assert.equal(playerMayNote(actor, users[0]), true);
 });
 
-test("scope keys distinguish personal notes but share one party Journal", () => {
-  assert.equal(isValidScope("shared"),true);
-  assert.equal(isValidScope("personal"),true);
-  assert.equal(isValidScope("gm"),false);
-  assert.equal(journalKey("Actor.foo","shared","a"),journalKey("Actor.foo","shared","b"));
-  assert.notEqual(journalKey("Actor.foo","personal","a"),journalKey("Actor.foo","personal","b"));
+test("collection and page identity are independent of displayed names", () => {
+  assert.equal(isValidScope("shared"), true);
+  assert.equal(isValidScope("personal"), true);
+  assert.equal(isValidScope("private"), false);
+  assert.equal(collectionKey("recurring", "shared", "a"), collectionKey("recurring", "shared", "b"));
+  assert.notEqual(collectionKey("recurring", "personal", "a"), collectionKey("recurring", "personal", "b"));
+  assert.notEqual(collectionKey("recurring", "shared"), collectionKey("scene", "shared"));
+  assert.equal(collectionKey("bad", "shared"), null);
+  assert.equal(collectionKey("scene", "personal"), null);
+  assert.equal(collectionName("recurring", "shared"), "Party \u2014 Recurring NPCs");
+  assert.equal(collectionName("scene", "shared"), "Party \u2014 Scene NPCs");
+  assert.equal(collectionName("recurring", "personal", "Alice"), "Alice \u2014 Recurring NPCs (Personal)");
 });
 
-test("new party Journals give edit rights to players, independent of NPC stats", () => {
-  const a=actor("secret",[]);
-  const ownership=buildOwnership(a,"shared","playerA",users,CONST.DOCUMENT_OWNERSHIP_LEVELS);
-  assert.deepEqual(ownership,{default:0,playerA:3,playerB:3});
-  assert.equal(ownership.gm,undefined);
-  assert.equal(ownership.visitor,undefined);
+test("page names use Actor names for linked NPCs, Token/Scene for unlinked", () => {
+  const actor = makeActor("npc");
+  assert.equal(pageName({ actor, subjectUuid: actor.uuid }), "Secret npc");
+  assert.equal(pageName({ actor, subjectUuid: "Scene.map.Token.t1",
+    token: { name: "Security Guard", parent: { name: "Night Club" } } }),
+  "Security Guard [seen in Night Club]");
+  assert.equal(pageName({ actor, subjectUuid: "Scene.map.Token.t1", token: { name: "", parent: {} } }),
+    "Secret npc [seen in Unknown Scene]");
+  assert.throws(() => pageName({ subjectUuid: "bad" }), /Invalid/);
 });
 
-test("new personal Journals only give rights to the author", () => {
-  const a=actor("secret",[]);
-  assert.deepEqual(buildOwnership(a,"personal","playerA",users,CONST.DOCUMENT_OWNERSHIP_LEVELS),{
-    default:0,playerA:3
-  });
-  assert.deepEqual(buildOwnership(a,"personal","gm",users,CONST.DOCUMENT_OWNERSHIP_LEVELS),{
-    default:0
-  });
-  assert.throws(()=>buildOwnership(a,"personal","missing",users,CONST.DOCUMENT_OWNERSHIP_LEVELS));
+test("shared journals grant all current and future players edit access", () => {
+  assert.deepEqual(collectionOwnership("shared", "a", users, CONST.DOCUMENT_OWNERSHIP_LEVELS),
+    { default: 3 });
 });
 
-test("a shared note stores one Journal with a page, not an Actor mutation", async () => {
-  const a=actor("foo",[]);
-  const entry=await ensureJournal({actor:a,subjectUuid:a.uuid},"shared","playerA",{anonymous:true});
-  assert.equal(entry.name,"Secret Actor foo - Party Notes");
-  assert.equal(entry.pages[0].type,"text");
-  assert.equal(entry.pages[0].text.content,"<p></p>");
-  assert.equal(entry.pages[0].text.format,1);
-  assert.equal(entry.ownership.playerA,3);
-  assert.equal(entry.ownership.playerB,3);
-  assert.equal(entry.flags[MODULE_ID].noteLink.subjectUuid,a.uuid);
-  assert.equal(folderCreations,1);
-  assert.equal(actorWrites,0);
+test("personal journals grant no other player access and GMs retain implicit access", () => {
+  assert.deepEqual(collectionOwnership("personal", "a", users, CONST.DOCUMENT_OWNERSHIP_LEVELS),
+    { default: 0, a: 3 });
+  assert.deepEqual(collectionOwnership("personal", "gm", users, CONST.DOCUMENT_OWNERSHIP_LEVELS),
+    { default: 0 });
+  assert.throws(() => collectionOwnership("personal", "missing", users, CONST.DOCUMENT_OWNERSHIP_LEVELS));
 });
 
-test("linked notes use the real Actor name rather than a UUID fragment", async () => {
-  const a=actor("foo");
-  const entry=await ensureJournal({actor:a,subjectUuid:a.uuid},"shared","playerA");
-  assert.equal(entry.name,"Secret Actor foo - Party Notes");
+test("first shared page creates one consolidated Journal and a flagged page", async () => {
+  const actor = makeActor("npc");
+  const { entry, page } = await ensurePage({ actor, subjectUuid: actor.uuid }, "shared", "a");
+  assert.equal(entry.name, "Party \u2014 Recurring NPCs");
+  assert.equal(page.name, "Secret npc");
+  assert.equal(page.text.content, "<p></p>");
+  assert.equal(page.text.format, 1);
+  assert.deepEqual(entry.flags[MODULE_ID][COLLECTION_FLAG],
+    { schema: SCHEMA, kind: "recurring", scope: "shared" });
+  assert.deepEqual(page.flags[MODULE_ID][PAGE_FLAG], { schema: SCHEMA, subjectUuid: actor.uuid });
+  assert.equal(entry.ownership.default, 3);
+  assert.equal(folders.length, 1);
+  assert.equal(actorWrites, 0);
 });
 
-test("unlinked token names include their Scene and preserve the Token's own label", async () => {
-  const a=actor("foo");
-  const token={name:"Desk Sergeant",parent:{name:"Downtown Police Precinct"}};
-  const subject={actor:a,token,subjectUuid:"Scene.scA.Token.tokA"};
-  const entry=await ensureJournal(subject,"shared","playerA");
-  assert.equal(entry.name,"Desk Sergeant [seen in Downtown Police Precinct] - Party Notes");
-  assert.equal(entry.flags[MODULE_ID].noteLink.subjectUuid,subject.subjectUuid);
-  const personal=await ensureJournal(subject,"personal","playerA");
-  assert.equal(personal.name,"Desk Sergeant [seen in Downtown Police Precinct] - User playerA Notes");
+test("two recurring NPCs become pages within the same Journal", async () => {
+  const a = makeActor("alpha"); const b = makeActor("beta");
+  const first = await ensurePage({ actor: a, subjectUuid: a.uuid }, "shared", "a");
+  const second = await ensurePage({ actor: b, subjectUuid: b.uuid }, "shared", "b");
+  assert.strictEqual(first.entry, second.entry);
+  assert.notEqual(first.page.id, second.page.id);
+  assert.equal(journals.length, 1);
+  assert.equal(journals[0].pages.length, 2);
 });
 
-test("only exact v0.2.0 generated titles are repaired on access", async () => {
-  const a=actor("foo"); const subject={actor:a,subjectUuid:a.uuid};
-  const entry=fakeJournal({
-    name:"NPC foo - Party Notes", ownership:{default:0,playerA:3},
-    pages:[{text:{content:"<p>My old notes stay put</p>"}}],
-    flags:{[MODULE_ID]:{noteLink:{schema:1,subjectUuid:a.uuid,scope:"shared"}}}
-  });
-  assert.equal(isLegacyGeneratedTitle(entry,subject.subjectUuid,"shared"),true);
-  const reopened=await ensureJournal(subject,"shared","playerA");
-  assert.strictEqual(reopened,entry);
-  assert.equal(entry.name,"Secret Actor foo - Party Notes");
-  assert.deepEqual(updated,[{id:entry.id,change:{name:"Secret Actor foo - Party Notes"}}]);
-  assert.equal(entry.pages[0].text.content,"<p>My old notes stay put</p>");
-  assert.deepEqual(entry.ownership,{default:0,playerA:3});
-  assert.equal(created.length,0);
-  assert.strictEqual(await ensureJournal(subject,"shared","playerB"),entry);
-  assert.equal(updated.length,1);
+test("two scene NPCs from one Actor template get different pages, same Journal", async () => {
+  const actor = makeActor("guard");
+  const t1 = { actor, subjectUuid: "Scene.map.Token.t1", token: {name:"Guard",parent:{name:"Warehouse"}} };
+  const t2 = { actor, subjectUuid: "Scene.map.Token.t2", token: {name:"Guard",parent:{name:"Warehouse"}} };
+  const a = await ensurePage(t1, "shared", "a");
+  const b = await ensurePage(t2, "shared", "a");
+  assert.equal(journals.length, 1);
+  assert.equal(a.entry.name, "Party \u2014 Scene NPCs");
+  assert.notEqual(a.page.id, b.page.id);
+  assert.equal(a.page.name, b.page.name);
+  assert.equal(a.page.flags[MODULE_ID].pageLink.subjectUuid, t1.subjectUuid);
+  assert.equal(b.page.flags[MODULE_ID].pageLink.subjectUuid, t2.subjectUuid);
 });
 
-test("user-customized titles and unrelated Journal names remain unchanged", async () => {
-  const a=actor("foo"); const subject={actor:a,subjectUuid:a.uuid};
-  const custom=fakeJournal({name:"We met the captain",ownership:{default:0,playerA:3},
-    flags:{[MODULE_ID]:{noteLink:{schema:1,subjectUuid:a.uuid,scope:"shared"}}}
-  });
-  assert.equal(isLegacyGeneratedTitle(custom,subject.subjectUuid,"shared"),false);
-  await ensureJournal(subject,"shared","playerA");
-  assert.equal(custom.name,"We met the captain");
-  assert.equal(updated.length,0);
+test("separate shared Journals for recurring and scene NPCs", async () => {
+  const actor = makeActor("guard");
+  const recurring = await ensurePage({ actor, subjectUuid: actor.uuid }, "shared", "a");
+  const scene = await ensurePage({ actor, subjectUuid: "Scene.map.Token.t1" }, "shared", "a");
+  assert.notEqual(recurring.entry.id, scene.entry.id);
+  assert.equal(journals.length, 2);
+  assert.equal(folders.length, 1);
 });
 
-test("title builder falls back safely for an unnamed scene but keeps the UUID key", () => {
-  const a=actor("foo");
-  assert.equal(journalTitle({actor:a,subjectUuid:"Actor.foo"},"shared"),"Secret Actor foo - Party Notes");
-  assert.equal(journalTitle({actor:a,subjectUuid:"Scene.scA.Token.tokA",token:{name:"Watchman",parent:{}}},"shared"),
-    "Watchman [seen in Unknown Scene] - Party Notes");
+test("two private Journals per player and no cross-player Journal sharing", async () => {
+  const actor = makeActor("guard");
+  await ensurePage({ actor, subjectUuid: actor.uuid }, "personal", "a");
+  await ensurePage({ actor, subjectUuid: "Scene.map.Token.t1" }, "personal", "a");
+  await ensurePage({ actor, subjectUuid: actor.uuid }, "personal", "b");
+  await ensurePage({ actor, subjectUuid: "Scene.map.Token.t1" }, "personal", "b");
+  assert.equal(journals.length, 4);
+  assert.equal(journals.every(j => j.ownership.default === 0), true);
+  assert.equal(journals.filter(j => j.ownership.a === 3).length, 2);
+  assert.equal(journals.filter(j => j.ownership.b === 3).length, 2);
+  assert.equal(findCollection(journals, "recurring", "personal", "a").testUserPermission(users[2], "OWNER"), false);
 });
 
-test("personal notes are never returned as party or another player's", async () => {
-  const a=actor("foo");
-  const note=await ensureJournal({actor:a,subjectUuid:a.uuid},"personal","playerA");
-  assert.equal(findJournal(journal,a.uuid,"personal","playerA"),note);
-  assert.equal(findJournal(journal,a.uuid,"personal","playerB"),null);
-  assert.equal(findJournal(journal,a.uuid,"shared","playerA"),null);
-  assert.equal(note.ownership.playerB,undefined);
+test("one subject in party and private creates one page in each category", async () => {
+  const actor = makeActor("target");
+  const party = await ensurePage({ actor, subjectUuid: actor.uuid }, "shared", "a");
+  const personal = await ensurePage({ actor, subjectUuid: actor.uuid }, "personal", "a");
+  assert.notEqual(party.entry.id, personal.entry.id);
+  assert.notEqual(party.page.id, personal.page.id);
 });
 
-test("repeated and concurrent requests reuse Journal and folder without duplicates", async () => {
-  const a=actor("foo"); const subject={actor:a,subjectUuid:a.uuid};
-  const [first,second]=await Promise.all([
-    ensureJournal(subject,"shared","playerA"),
-    ensureJournal(subject,"shared","playerB")
+test("repeated and concurrent creates reuse a single page and Journal", async () => {
+  const actor = makeActor("guard"); const subject = {actor,subjectUuid:actor.uuid};
+  const [first, second, third] = await Promise.all([
+    ensurePage(subject, "shared", "a"), ensurePage(subject, "shared", "b"),
+    ensurePage(subject, "shared", "a")
   ]);
-  assert.strictEqual(first,second);
-  assert.strictEqual(first,await ensureJournal(subject,"shared","playerA"));
-  assert.equal(created.length,1);
-  assert.equal(folderCreations,1);
+  assert.strictEqual(first.entry, second.entry);
+  assert.strictEqual(first.page, third.page);
+  assert.equal(journals.length, 1);
+  assert.equal(journals[0].pages.length, 1);
 });
 
-test("existing v0.1.1 party Journal permissions and content are not modified", async () => {
-  const a=actor("foo"); const subject={actor:a,subjectUuid:a.uuid};
-  const legacy=fakeJournal({
-    name:"Old party notes", ownership:{default:0,playerA:3},
-    pages:[{text:{content:"<p>Private legacy text</p>"}}],
-    flags:{ [MODULE_ID]:{ noteLink:{schema:1,subjectUuid:a.uuid,scope:"shared"} } }
+test("old per-NPC notes remain unchanged, not migrated or implicitly reused", async () => {
+  const actor = makeActor("target");
+  const legacy = fakeJournal({
+    name: "Secret target - Party Notes", ownership: {default:0,a:3},
+    flags:{[MODULE_ID]:{noteLink:{schema:1,scope:"shared",subjectUuid:actor.uuid}}}
   });
-  const again=await ensureJournal(subject,"shared","playerB");
-  assert.strictEqual(again,legacy);
-  assert.deepEqual(legacy.ownership,{default:0,playerA:3});
-  assert.equal(legacy.pages[0].text.content,"<p>Private legacy text</p>");
-  assert.equal(updated.length,0);
-  assert.equal(created.length,0);
+  const oldPage = makePage({name:"Notes",text:{content:"<p>Old content</p>"}},legacy);
+  legacy.pages.push(oldPage);
+  const oldId = legacy.id;
+  const newer = await ensurePage({actor,subjectUuid:actor.uuid},"shared","a");
+  assert.notEqual(newer.entry.id,oldId);
+  assert.equal(journals.length,2);
+  assert.equal(legacy.pages[0].text.content,"<p>Old content</p>");
+  assert.deepEqual(legacy.ownership,{default:0,a:3});
+  assert.equal(journalUpdates.length,0);
+  assert.equal(findCollection([legacy],"recurring","shared"),null);
 });
 
-test("two different unlinked tokens get separate Journals", async () => {
-  const a=actor("foo");
-  const t1={actor:a,subjectUuid:"Scene.scA.Token.tokA"};
-  const t2={actor:a,subjectUuid:"Scene.scA.Token.tokB"};
-  const x=await ensureJournal(t1,"shared","playerA",{anonymous:true});
-  const y=await ensureJournal(t2,"shared","playerA",{anonymous:true});
-  assert.notEqual(x.id,y.id);
-  assert.equal(journal.length,2);
+test("manual page titles and note HTML persist across reopening", async () => {
+  const actor = makeActor("target"); const subject = {actor,subjectUuid:actor.uuid};
+  const first = await ensurePage(subject,"shared","a");
+  first.page.name = "My nickname";
+  first.page.text.content = "<p>Found the artifact</p>";
+  actor.name = "Different NPC name";
+  const next = await ensurePage(subject,"shared","a");
+  assert.strictEqual(first.page,next.page);
+  assert.equal(next.page.name,"My nickname");
+  assert.equal(next.page.text.content,"<p>Found the artifact</p>");
+  assert.equal(journalUpdates.length,0);
 });
 
-test("invalid scope, missing user, non-GM cannot create Journal", async () => {
-  const a=actor("foo"); const subject={actor:a,subjectUuid:a.uuid};
-  await assert.rejects(ensureJournal(subject,"other","playerA"));
-  await assert.rejects(ensureJournal(subject,"personal","missing"));
+test("new pages inherit existing personal Journal ownership without rewrites", async () => {
+  const a=makeActor("alpha"), b=makeActor("beta");
+  const one=await ensurePage({actor:a,subjectUuid:a.uuid},"personal","a");
+  one.entry.ownership={default:0,a:3};
+  const two=await ensurePage({actor:b,subjectUuid:b.uuid},"personal","a");
+  assert.strictEqual(one.entry,two.entry);
+  assert.deepEqual(two.entry.ownership,{default:0,a:3});
+  assert.equal(journalUpdates.length,0);
+});
+
+test("unflagged Journals and unflagged pages are never taken over", async () => {
+  const a=makeActor("target");
+  const untagged=fakeJournal({name:"Party \u2014 Recurring NPCs",ownership:{default:3}});
+  const untaggedPage=makePage({name:a.name},untagged);untagged.pages.push(untaggedPage);
+  const opened=await ensurePage({actor:a,subjectUuid:a.uuid},"shared","a");
+  assert.notStrictEqual(opened.entry,untagged);
+  assert.notStrictEqual(opened.page,untaggedPage);
+  assert.equal(journals.length,2);
+});
+
+test("only active GM is allowed to create collections and pages", async () => {
+  const actor=makeActor("target");
   game.user=users[1];
-  await assert.rejects(ensureJournal(subject,"shared","playerA"),/GM/);
-  assert.equal(created.length,0);
+  await assert.rejects(ensurePage({actor,subjectUuid:actor.uuid},"shared","a"),/GM/);
+  await assert.rejects(ensureCollection("scene","shared","a"),/GM/);
+  assert.equal(journals.length,0);
 });
 
-test("journal search ignores unrelated flags and old schema", () => {
-  const invalid={getFlag:()=>({schema:0,subjectUuid:"Actor.foo",scope:"shared"})};
-  assert.equal(findJournal([invalid],"Actor.foo","shared","playerA"),null);
+test("invalid scope, malformed UUID, deleted user cannot create notes", async () => {
+  const actor=makeActor("target");
+  await assert.rejects(ensurePage({actor,subjectUuid:actor.uuid},"other","a"),/Invalid/);
+  await assert.rejects(ensurePage({actor,subjectUuid:"bad uuid"},"shared","a"),/Invalid/);
+  await assert.rejects(ensurePage({actor,subjectUuid:actor.uuid},"personal","missing"),/Player/);
+  assert.equal(journals.length,0);
 });

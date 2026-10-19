@@ -1,13 +1,16 @@
 /**
- * G06-NPC Notes (AFT NPC Notes): journal associations, independent of Actor ownership.
- * Existing Journal associations and permissions are never rewritten by an upgrade.
+ * G06 - AFT NPC Notes: v2 page-based storage (Foundry v14).
+ * Native world Journals hold pages. No Actor/Token writes and no v1 migration.
  */
 export const MODULE_ID = "player-npc-notes";
-export const JOURNAL_FLAG = "noteLink";
 export const FOLDER_FLAG = "managedFolder";
-export const SCHEMA = 1;
+export const COLLECTION_FLAG = "collectionLink";
+export const PAGE_FLAG = "pageLink";
+export const SCHEMA = 2;
 
-const inflight = new Map();
+const collectionInflight = new Map();
+const pageInflight = new Map();
+const UUID_PATTERN = /^(Actor\.[A-Za-z0-9]+|Scene\.[A-Za-z0-9]+\.Token\.[A-Za-z0-9]+)$/;
 
 export function subjectUuidForActor(actor) {
   if (!actor || actor.documentName !== "Actor") return null;
@@ -15,7 +18,7 @@ export function subjectUuidForActor(actor) {
   return actor.uuid ?? null;
 }
 
-/** Identifies a linked Actor across scenes, or one particular unlinked Token. */
+/** One Actor across linked tokens, but each unlinked placed Token has its own identity. */
 export function subjectUuidForToken(token) {
   const doc = token?.document?.documentName === "Token" ? token.document : token;
   if (doc?.documentName !== "Token" || typeof doc.uuid !== "string") return null;
@@ -23,12 +26,16 @@ export function subjectUuidForToken(token) {
     if (!/^[A-Za-z0-9]+$/.test(doc.actorId ?? "")) return null;
     return `Actor.${doc.actorId}`;
   }
-  return doc.uuid;
+  return UUID_PATTERN.test(doc.uuid) ? doc.uuid : null;
+}
+
+export function kindForUuid(uuid) {
+  if (typeof uuid !== "string" || !UUID_PATTERN.test(uuid)) return null;
+  return uuid.startsWith("Actor.") ? "recurring" : "scene";
 }
 
 export async function resolveSubject(subjectUuid, lookup = globalThis.fromUuid) {
-  if (typeof subjectUuid !== "string" || subjectUuid.length > 256) return null;
-  if (!/^(Actor\.[A-Za-z0-9]+|Scene\.[A-Za-z0-9]+\.Token\.[A-Za-z0-9]+)$/.test(subjectUuid)) return null;
+  if (typeof subjectUuid !== "string" || subjectUuid.length > 256 || !kindForUuid(subjectUuid)) return null;
   const doc = await lookup(subjectUuid);
   if (doc?.documentName === "Actor" && !doc.inCompendium) {
     return { actor: doc, subjectUuid };
@@ -39,79 +46,84 @@ export async function resolveSubject(subjectUuid, lookup = globalThis.fromUuid) 
   return null;
 }
 
-/** Previous sheet-based workflow remains available for Actors with Limited access. */
+/** Sheet entry point still respects the game's Actor permissions. */
 export function playerMayNote(actor, user) {
   return Boolean(actor && user && actor.testUserPermission?.(user, "LIMITED"));
-}
-
-export function journalKey(subjectUuid, scope, userId = "") {
-  return `${subjectUuid}|${scope}|${scope === "personal" ? userId : ""}`;
 }
 
 export function isValidScope(scope) {
   return scope === "shared" || scope === "personal";
 }
 
-export function journalLink(entry) {
-  return entry?.getFlag?.(MODULE_ID, JOURNAL_FLAG) ?? null;
+export function isValidKind(kind) {
+  return kind === "recurring" || kind === "scene";
 }
 
-export function findJournal(journals, subjectUuid, scope, userId) {
-  if (!isValidScope(scope)) return null;
+export function collectionKey(kind, scope, userId = "") {
+  if (!isValidKind(kind) || !isValidScope(scope)) return null;
+  if (scope === "personal" && !userId) return null;
+  return `${scope}|${kind}|${scope === "personal" ? userId : ""}`;
+}
+
+export function collectionLink(entry) {
+  return entry?.getFlag?.(MODULE_ID, COLLECTION_FLAG) ?? null;
+}
+
+export function pageLink(page) {
+  return page?.getFlag?.(MODULE_ID, PAGE_FLAG) ?? null;
+}
+
+/** Only schema-2 collections are candidates; v0.2.1 noteLink Journals are ignored. */
+export function findCollection(journals, kind, scope, userId = "") {
+  if (!collectionKey(kind, scope, userId)) return null;
   return Array.from(journals).find(entry => {
-    const link = journalLink(entry);
-    return link?.schema === SCHEMA && link.subjectUuid === subjectUuid &&
-      link.scope === scope && (scope === "shared" || link.userId === userId);
+    const link = collectionLink(entry);
+    return link?.schema === SCHEMA && link.kind === kind && link.scope === scope &&
+      (scope === "shared" || link.userId === userId);
   }) ?? null;
 }
 
-/**
- * Journals have their own permissions. New party notes are explicitly shared
- * with the world players; personal notes only with their author and GMs.
- * These defaults apply at CREATE time only: preexisting Journal permissions
- * are always left untouched, including journals made by prior versions.
- */
-/**
- * Names are display-only. The existing UUID/flags remain the identity of a note.
- * A linked Actor uses its own name. An unlinked Token uses its visible Token
- * name and the Scene in which that particular instance was encountered.
- */
-export function journalTitle(subject, scope, userName = "") {
-  if (!isValidScope(scope) || !subject?.subjectUuid) throw new Error("Invalid note title request.");
-  const cleanName = (value, fallback) =>
-    typeof value === "string" && value.trim() ? value.trim() : fallback;
-  let label;
-  if (subject.subjectUuid.startsWith("Scene.")) {
-    const tokenName = cleanName(subject.token?.name ?? subject.actor?.token?.name,
-      cleanName(subject.actor?.name, "Unnamed Token"));
-    const sceneName = cleanName(subject.token?.parent?.name, "Unknown Scene");
-    label = `${tokenName} [seen in ${sceneName}]`;
-  } else {
-    label = cleanName(subject.actor?.name, "Unnamed NPC");
+export function findPage(entry, subjectUuid) {
+  if (!kindForUuid(subjectUuid)) return null;
+  const pages = entry?.pages;
+  if (!pages) return null;
+  return Array.from(pages).find(page => {
+    const link = pageLink(page);
+    return link?.schema === SCHEMA && link.subjectUuid === subjectUuid;
+  }) ?? null;
+}
+
+export function pageName(subject) {
+  if (!kindForUuid(subject?.subjectUuid)) throw new Error("Invalid NPC page identity.");
+  const clean = (s, fallback) => typeof s === "string" && s.trim() ? s.trim() : fallback;
+  if (kindForUuid(subject.subjectUuid) === "recurring") {
+    return clean(subject.actor?.name, "Unnamed NPC");
   }
-  return `${label} - ${scope === "shared" ? "Party" : userName} Notes`;
+  const tokenName = clean(subject.token?.name ?? subject.actor?.token?.name,
+    clean(subject.actor?.name, "Unnamed Token"));
+  const sceneName = clean(subject.token?.parent?.name, "Unknown Scene");
+  return `${tokenName} [seen in ${sceneName}]`;
 }
 
-/** Match only the exact short-UUID title originally generated by v0.2.0. */
-export function isLegacyGeneratedTitle(entry, subjectUuid, scope, userName = "") {
-  if (!entry || !isValidScope(scope) || typeof subjectUuid !== "string") return false;
-  const suffix = subjectUuid.split(".").at(-1).slice(-6);
-  const original = `NPC ${suffix} - ${scope === "shared" ? "Party" : userName} Notes`;
-  return entry.name === original;
+export function collectionName(kind, scope, userName = "") {
+  if (!collectionKey(kind, scope, scope === "personal" ? "user" : "")) throw new Error("Invalid collection name.");
+  const category = kind === "recurring" ? "Recurring NPCs" : "Scene NPCs";
+  return scope === "shared" ? `Party \u2014 ${category}` :
+    `${userName?.trim() || "Player"} \u2014 ${category} (Personal)`;
 }
 
-export function buildOwnership(_actor, scope, userId, users, levels) {
+/**
+ * Party collection is open to all world players now and future: default OWNER.
+ * Private collection has default NONE and an explicit OWNER for its player.
+ * Neither model changes Actor permission or modifies an existing Journal.
+ */
+export function collectionOwnership(scope, userId, users, levels) {
+  if (scope === "shared") return { default: levels.OWNER };
+  if (scope !== "personal") throw new Error("Invalid notes scope.");
+  const user = Array.from(users).find(u => u.id === userId);
+  if (!user) throw new Error("Player not found.");
   const ownership = { default: levels.NONE };
-  if (scope === "personal") {
-    const user = Array.from(users).find(u => u.id === userId);
-    if (!user) throw new Error("The requested player is no longer in this world.");
-    if (!user.isGM) ownership[user.id] = levels.OWNER;
-  } else if (scope === "shared") {
-    for (const user of users) {
-      if (user.isGM || user.role === 0) continue;
-      ownership[user.id] = levels.OWNER;
-    }
-  } else throw new Error("Unknown notes scope.");
+  if (!user.isGM) ownership[userId] = levels.OWNER;
   return ownership;
 }
 
@@ -121,60 +133,62 @@ async function ensureFolder() {
   );
   if (found) return found;
   return Folder.implementation.create({
-    name: "AFT NPC Notes",
-    type: "JournalEntry",
+    name: "AFT NPC Notes", type: "JournalEntry",
     flags: { [MODULE_ID]: { [FOLDER_FLAG]: true } }
   });
 }
 
-export async function ensureJournal(subject, scope, userId) {
-  if (!game.user?.isGM) throw new Error("A GM must create NPC note Journals.");
-  if (!subject?.actor || !subject.subjectUuid || !isValidScope(scope)) {
-    throw new Error("Invalid NPC note request.");
-  }
-  if (scope === "personal" && !game.users.get(userId)) throw new Error("Unknown player.");
-  const key = journalKey(subject.subjectUuid, scope, userId);
-  if (inflight.has(key)) return inflight.get(key);
+/** Active GM only; no creation or implicit adoption of old per-NPC Journals. */
+export async function ensureCollection(kind, scope, userId) {
+  if (!game.user?.isGM) throw new Error("An online GM is required to create an NPC Journal.");
+  const key = collectionKey(kind, scope, userId);
+  if (!key) throw new Error("Invalid NPC Journal category.");
+  if (scope === "personal" && !game.users.get(userId)) throw new Error("Player not found.");
+  if (collectionInflight.has(key)) return collectionInflight.get(key);
   const work = (async () => {
-    const existing = findJournal(game.journal, subject.subjectUuid, scope, userId);
-    const requester = game.users.get(userId);
-    const title = journalTitle(subject, scope, requester?.name ?? "");
-    if (existing) {
-      // Only the module's own short-UUID title is eligible for a correction.
-      // This is a single, on-access name change, never a bulk migration.
-      // Journal ID, pages, noteLink flags, and ownership remain untouched.
-      if (isLegacyGeneratedTitle(existing, subject.subjectUuid, scope, requester?.name) &&
-          existing.name !== title) {
-        await existing.update({ name: title });
-      }
-      return existing;
-    }
+    const existing = findCollection(game.journal, kind, scope, userId);
+    if (existing) return existing; // Never change an existing Journal or its ownership.
     const folder = await ensureFolder();
-    const ownership = buildOwnership(subject.actor, scope, userId, game.users, CONST.DOCUMENT_OWNERSHIP_LEVELS);
-    const entry = await JournalEntry.implementation.create({
-      name: title,
+    const requester = scope === "personal" ? game.users.get(userId) : null;
+    return JournalEntry.implementation.create({
+      name: collectionName(kind, scope, requester?.name),
       folder: folder?.id ?? null,
-      ownership,
-      flags: {
-        [MODULE_ID]: {
-          [JOURNAL_FLAG]: {
-            schema: SCHEMA,
-            subjectUuid: subject.subjectUuid,
-            scope,
-            ...(scope === "personal" ? { userId } : {})
-          }
-        }
-      },
-      pages: [{
-        name: "Notes",
-        type: "text",
-        text: { content: "<p></p>", format: CONST.JOURNAL_ENTRY_PAGE_FORMATS.HTML }
-      }]
+      ownership: collectionOwnership(scope, userId, game.users, CONST.DOCUMENT_OWNERSHIP_LEVELS),
+      flags: { [MODULE_ID]: { [COLLECTION_FLAG]: {
+        schema: SCHEMA, kind, scope,
+        ...(scope === "personal" ? { userId } : {})
+      } } },
+      pages: []
     });
-    if (!entry) throw new Error("Foundry did not create the NPC notes Journal.");
-    return entry;
   })();
-  inflight.set(key, work);
+  collectionInflight.set(key, work);
   try { return await work; }
-  finally { inflight.delete(key); }
+  finally { collectionInflight.delete(key); }
+}
+
+/** One page per subject UUID per collection, guarded against concurrent first-clicks. */
+export async function ensurePage(subject, scope, userId) {
+  if (!game.user?.isGM) throw new Error("An online GM is required to create an NPC page.");
+  const kind = kindForUuid(subject?.subjectUuid);
+  if (!kind || !subject?.actor || !isValidScope(scope)) throw new Error("Invalid NPC page request.");
+  if (scope === "personal" && !game.users.get(userId)) throw new Error("Player not found.");
+  const key = `${collectionKey(kind, scope, userId)}|${subject.subjectUuid}`;
+  if (pageInflight.has(key)) return pageInflight.get(key);
+  const work = (async () => {
+    const entry = await ensureCollection(kind, scope, userId);
+    if (!entry) throw new Error("Could not create the NPC notes Journal.");
+    let page = findPage(entry, subject.subjectUuid);
+    if (page) return { entry, page };
+    const created = await entry.createEmbeddedDocuments("JournalEntryPage", [{
+      name: pageName(subject), type: "text",
+      text: { content: "<p></p>", format: CONST.JOURNAL_ENTRY_PAGE_FORMATS.HTML },
+      flags: { [MODULE_ID]: { [PAGE_FLAG]: { schema: SCHEMA, subjectUuid: subject.subjectUuid } } }
+    }]);
+    page = created?.[0];
+    if (!page) throw new Error("Foundry did not create the NPC notes page.");
+    return { entry, page };
+  })();
+  pageInflight.set(key, work);
+  try { return await work; }
+  finally { pageInflight.delete(key); }
 }

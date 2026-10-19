@@ -1,6 +1,6 @@
 import {
   MODULE_ID, subjectUuidForActor, subjectUuidForToken, resolveSubject,
-  playerMayNote, findJournal, ensureJournal, isValidScope, isLegacyGeneratedTitle
+  playerMayNote, findCollection, findPage, kindForUuid, ensurePage, isValidScope
 } from "./store.mjs";
 
 const QUERY_ENSURE = `${MODULE_ID}.ensure`;
@@ -41,7 +41,7 @@ function isRequestId(id) {
   return typeof id === "string" && /^[A-Za-z0-9]{8,32}$/.test(id);
 }
 
-/** This must be checked on the PLAYER client, where their vision is evaluated. */
+/** Local per-player visibility; no NPC Actor permission is required. */
 export function isVisibleToken(token) {
   return Boolean(token?.document?.documentName === "Token" &&
     token.document.uuid && !token.document.hidden && token.isVisible === true &&
@@ -66,9 +66,9 @@ function matchingRequest(req, candidate) {
 }
 
 /**
- * Foundry User.query authenticates the target but supplies no caller ID to the
- * recipient handler. The GM queries the claimed player back and demands an
- * exact pending, client-local button click, plus visible token evidence.
+ * Foundry User.query authenticates the target, not a claimed request sender.
+ * Challenge the specific player's live client, requiring the locally pending
+ * random request and (for tokens) their scene visibility before GM creation.
  */
 async function confirmPendingRequest(candidate) {
   if (!matchingRequest(waitingForConfirmation.get(candidate?.requestId), candidate)) return false;
@@ -77,7 +77,6 @@ async function confirmPendingRequest(candidate) {
   return isVisibleToken(token) && subjectUuidForToken(token) === candidate.subjectUuid;
 }
 
-/** A GM independently verifies the referenced token and its scene. */
 async function verifyGMTokenEvidence(message, requester) {
   const tokenDoc = await globalThis.fromUuid(message.tokenUuid);
   if (tokenDoc?.documentName !== "Token" || tokenDoc.hidden ||
@@ -88,7 +87,7 @@ async function verifyGMTokenEvidence(message, requester) {
   return resolveSubject(message.subjectUuid);
 }
 
-async function ensureRequestedNotes(message) {
+async function ensureRequestedPage(message) {
   if (!isActiveGM() || !isRequestId(message?.requestId) ||
       !isValidScope(message?.scope) || typeof message.userId !== "string" ||
       !["actor", "token"].includes(message?.source) ||
@@ -98,12 +97,12 @@ async function ensureRequestedNotes(message) {
     return { error: "The player is unavailable or the request limit was reached." };
   }
   try {
-    const request = {
+    const candidate = {
       requestId: message.requestId, subjectUuid: message.subjectUuid,
       scope: message.scope, source: message.source,
       tokenUuid: message.tokenUuid ?? null
     };
-    const confirmed = await requester.query(QUERY_CONFIRM, request, { timeout: 4500 });
+    const confirmed = await requester.query(QUERY_CONFIRM, candidate, { timeout: 4500 });
     if (confirmed !== true) throw new Error("The player did not confirm this request.");
 
     let subject;
@@ -116,23 +115,22 @@ async function ensureRequestedNotes(message) {
     }
     if (!subject) throw new Error("NPC notes are not available for this token or Actor.");
 
-    const existing = findJournal(game.journal, subject.subjectUuid, message.scope, requester.id);
+    const kind = kindForUuid(subject.subjectUuid);
+    const existing = findCollection(game.journal, kind, message.scope, requester.id);
     if (existing && !existing.testUserPermission(requester, "OWNER")) {
-      throw new Error("This Journal exists, but the GM must grant you Journal Owner access.");
+      throw new Error("The GM must grant you Owner permission on this notes Journal.");
     }
-    // Reuse the original Journal and correct only an untouched v0.2.0
-    // short-UUID title. This never changes permissions, pages, or identity.
-    const entry = await ensureJournal(subject, message.scope, requester.id);
-    return { journalId: entry.id };
+    const { entry, page } = await ensurePage(subject, message.scope, requester.id);
+    return { journalId: entry.id, pageId: page.id };
   } catch (error) {
-    console.error(`${MODULE_ID} | NPC note creation refused`, error);
+    console.error(`${MODULE_ID} | NPC page creation refused`, error);
     return { error: error?.message || "Unable to open NPC notes." };
   }
 }
 
-async function requestJournal(subjectUuid, scope, source, tokenUuid) {
+async function requestPage(subjectUuid, scope, source, tokenUuid) {
   const gm = game.users.activeGM;
-  if (!gm) throw new Error("A GM must be online to create the first NPC Journal.");
+  if (!gm) throw new Error("A GM must be online the first time you add this NPC's page.");
   if (!game.user?.can?.("QUERY_USER")) {
     throw new Error("The GM must allow user queries for NPC note creation.");
   }
@@ -143,57 +141,53 @@ async function requestJournal(subjectUuid, scope, source, tokenUuid) {
     const reply = await gm.query(QUERY_ENSURE, { ...request, userId: game.user.id }, {
       timeout: QUERY_WAIT_MS
     });
-    if (typeof reply?.journalId === "string") return reply.journalId;
-    throw new Error(reply?.error || "The GM did not return an NPC notes Journal.");
+    if (typeof reply?.journalId === "string" && typeof reply?.pageId === "string") return reply;
+    throw new Error(reply?.error || "The GM did not return an NPC notes page.");
   } finally {
     waitingForConfirmation.delete(requestId);
   }
 }
 
-async function waitForJournal(id) {
-  for (let attempt = 0; attempt < 12; attempt++) {
-    const entry = game.journal.get(id);
-    if (entry && entry.testUserPermission(game.user, "OWNER")) return entry;
-    await new Promise(resolve => setTimeout(resolve, 150));
+async function waitForPage(journalId, pageId) {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const entry = game.journal.get(journalId);
+    const page = entry?.pages?.get?.(pageId) ?? Array.from(entry?.pages ?? []).find(p => p.id === pageId);
+    if (entry?.testUserPermission(game.user, "OWNER") && page) return { entry, page };
+    await new Promise(resolve => setTimeout(resolve, 250));
   }
-  throw new Error("Journal permissions were not granted. Ask the GM for Journal Owner access.");
+  throw new Error("The Journal page is not visible or editable. Ask the GM to check permissions.");
+}
+
+async function openPageInJournal(entry, page) {
+  // Foundry v14 JournalEntrySheet can render and navigate to a given page ID.
+  const sheet = entry.sheet;
+  await sheet.render(true, { pageId: page.id });
+  if (typeof sheet.goToPage === "function") await sheet.goToPage(page.id);
 }
 
 async function openSubjectNotes(subjectUuid, scope, { source, tokenUuid = null } = {}) {
-  if (!isValidScope(scope)) throw new Error("Choose party notes or personal notes.");
-  let entry = findJournal(game.journal, subjectUuid, scope, game.user.id);
+  if (!isValidScope(scope) || !kindForUuid(subjectUuid)) throw new Error("Invalid NPC notes request.");
+  const kind = kindForUuid(subjectUuid);
+  let entry = findCollection(game.journal, kind, scope, game.user.id);
   if (entry && !entry.testUserPermission(game.user, "OWNER")) {
-    throw new Error("Ask the GM to grant Journal Owner access to these existing notes.");
+    throw new Error("The GM must grant you Journal Owner permission to edit these notes.");
   }
-  if (!entry) {
+  let page = entry && findPage(entry, subjectUuid);
+  if (!page) {
     if (game.user.isGM) {
       const subject = await resolveSubject(subjectUuid);
       if (!subject) throw new Error("This NPC is no longer in the world.");
-      entry = await ensureJournal(subject, scope, game.user.id);
+      ({ entry, page } = await ensurePage(subject, scope, game.user.id));
     } else {
-      const id = await requestJournal(subjectUuid, scope, source, tokenUuid);
-      entry = await waitForJournal(id);
-    }
-  } else if (isLegacyGeneratedTitle(entry, subjectUuid, scope, game.user.name)) {
-    // A player with Journal Owner permission may not be able to read an NPC's
-    // real Actor name. Ask the GM to resolve it rather than guessing from a
-    // token label. With no active GM, the old Journal still opens normally.
-    if (game.user.isGM) {
-      const subject = await resolveSubject(subjectUuid);
-      if (subject) entry = await ensureJournal(subject, scope, game.user.id);
-    } else if (game.users.activeGM && game.user.can?.("QUERY_USER")) {
-      try {
-        await requestJournal(subjectUuid, scope, source, tokenUuid);
-      } catch (error) {
-        console.warn(`${MODULE_ID} | Could not update the generated Journal title; existing notes remain usable.`, error);
-      }
+      const ids = await requestPage(subjectUuid, scope, source, tokenUuid);
+      ({ entry, page } = await waitForPage(ids.journalId, ids.pageId));
     }
   }
-  entry.sheet.render(true);
-  return entry;
+  await openPageInJournal(entry, page);
+  return entry; // Preserve the v0.2.1 API return type for macros/callers.
 }
 
-/** Backward-compatible API for sheet-based access where Actor LIMITED is granted. */
+/** Legacy sheet entry point still requires the system's Actor LIMITED right. */
 export async function openNotes(actor, scope) {
   if (!playerMayNote(actor, game.user)) throw new Error("You need access to this Actor's sheet.");
   const subjectUuid = subjectUuidForActor(actor);
@@ -201,7 +195,7 @@ export async function openNotes(actor, scope) {
   return openSubjectNotes(subjectUuid, scope, { source: "actor" });
 }
 
-/** Primary player workflow: no NPC Actor permission or sheet needed. */
+/** Main player workflow: visible token and no NPC Actor sheet permission. */
 export async function openTokenNotes(token, scope = "shared") {
   if (!isVisibleToken(token)) throw new Error("Notes can only be opened from a visible token on your scene.");
   const subjectUuid = subjectUuidForToken(token);
@@ -211,23 +205,35 @@ export async function openTokenNotes(token, scope = "shared") {
   });
 }
 
+async function chooseNotes(name, onSelect) {
+  const choice = await foundry.applications.api.DialogV2.wait({
+    window: { title: "NPC Notes" },
+    content: `<div class="pnn-chooser"><p><strong>${escapeHtml(name)}</strong></p>` +
+      "<p>Where do you want to write your notes?</p></div>",
+    buttons: [
+      { action: "shared", label: "Party Notes", icon: "fas fa-users", default: true },
+      { action: "personal", label: "My Notes", icon: "fas fa-lock" },
+      { action: "cancel", label: "Cancel" }
+    ],
+    close: () => null, rejectClose: false
+  });
+  if (isValidScope(choice)) return onSelect(choice);
+  return null;
+}
+
 export async function openChooser(actor) {
   try {
     if (!playerMayNote(actor, game.user)) throw new Error("You need access to this Actor's sheet.");
-    const name = escapeHtml(actor.name);
-    const choice = await foundry.applications.api.DialogV2.wait({
-      window: { title: `NPC Notes: ${actor.name}` },
-      content: `<div class="pnn-chooser"><p>Notes for <strong>${name}</strong> are stored in Foundry Journals, separate from the NPC Actor.</p><p><strong>Party:</strong> shared notes. <strong>Personal:</strong> visible only to you and GMs.</p></div>`,
-      buttons: [
-        { action: "shared", label: "Party Notes", icon: "fas fa-users", default: true },
-        { action: "personal", label: "My Notes", icon: "fas fa-lock" },
-        { action: "cancel", label: "Cancel" }
-      ],
-      close: () => null,
-      rejectClose: false
-    });
-    if (isValidScope(choice)) await openNotes(actor, choice);
-  } catch (error) { notifyError(error); }
+    return await chooseNotes(actor.name, scope => openNotes(actor, scope));
+  } catch (error) { notifyError(error); return null; }
+}
+
+export async function openTokenChooser(token) {
+  try {
+    if (!isVisibleToken(token)) throw new Error("The NPC token is no longer visible.");
+    // Use the player-visible token label, never a hidden Actor name, in the chooser.
+    return await chooseNotes(token.document.name ?? "NPC", scope => openTokenNotes(token, scope));
+  } catch (error) { notifyError(error); return null; }
 }
 
 function addV2HeaderControl(app, controls) {
@@ -250,7 +256,7 @@ function addLegacyHeaderControl(app, buttons) {
   });
 }
 
-/** Native Token HUD button remains for GMs and owners who can open the HUD. */
+/** Native Token HUD control for token owners; hover icon serves other players. */
 function addTokenHUDButton(app, html) {
   const token = app.object?.document?.documentName === "Token" ? app.object : null;
   if (!isVisibleToken(token)) return;
@@ -260,16 +266,19 @@ function addTokenHUDButton(app, html) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "control-icon pnn-token-button";
-  button.title = "AFT NPC Notes: Party Notes";
-  button.setAttribute("aria-label", "AFT NPC Notes: Party Notes");
+  button.title = "AFT NPC Notes (right-click: My Notes)";
+  button.setAttribute("aria-label", "AFT NPC Notes");
   const icon = document.createElement("i");
   icon.className = "fas fa-book-open";
   icon.setAttribute("aria-hidden", "true");
   button.append(icon);
   button.addEventListener("click", event => {
-    event.preventDefault();
-    event.stopPropagation();
-    void openTokenNotes(token, "shared").catch(notifyError);
+    event.preventDefault(); event.stopPropagation();
+    void openTokenChooser(token);
+  });
+  button.addEventListener("contextmenu", event => {
+    event.preventDefault(); event.stopPropagation();
+    void openTokenNotes(token, "personal").catch(notifyError);
   });
   container.append(button);
 }
@@ -311,11 +320,8 @@ function positionHoverButton() {
   hoverButton.style.top = `${Math.round(point.y + offsetY - 14)}px`;
 }
 
-/** Player shortcut on hover, including NPC tokens the player does not own. */
 function showHoverButton(token) {
   if (!isVisibleToken(token)) return;
-  // Foundry v14 exposes a public HTML HUD container above the Pixi canvas.
-  // Do not append HTML to #board: on some versions that element is a canvas.
   const board = canvas?.hud?.element ?? globalThis.document?.getElementById?.("hud");
   if (!(board instanceof HTMLElement)) return;
   clearHideTimer();
@@ -324,8 +330,8 @@ function showHoverButton(token) {
     hoverButton = document.createElement("button");
     hoverButton.type = "button";
     hoverButton.className = "pnn-hover-button";
-    hoverButton.title = "Open NPC Party Notes (right-click for personal notes)";
-    hoverButton.setAttribute("aria-label", "Open NPC Party Notes");
+    hoverButton.title = "Choose NPC Notes (right-click for My Notes)";
+    hoverButton.setAttribute("aria-label", "Choose NPC Notes");
     hoverButton.innerHTML = '<i class="fas fa-book-open" aria-hidden="true"></i>';
     hoverButton.addEventListener("pointerenter", clearHideTimer);
     hoverButton.addEventListener("pointerleave", scheduleHide);
@@ -333,7 +339,7 @@ function showHoverButton(token) {
       event.preventDefault(); event.stopPropagation();
       const selected = hoveredToken;
       removeHoverButton();
-      if (selected) void openTokenNotes(selected, "shared").catch(notifyError);
+      if (selected) void openTokenChooser(selected);
     });
     hoverButton.addEventListener("contextmenu", event => {
       event.preventDefault(); event.stopPropagation();
@@ -366,7 +372,9 @@ Hooks.on("canvasTearDown", removeHoverButton);
 Hooks.on("canvasReady", removeHoverButton);
 
 Hooks.once("ready", () => {
-  CONFIG.queries[QUERY_ENSURE] = ensureRequestedNotes;
+  requestWindows.clear();
+  waitingForConfirmation.clear();
+  CONFIG.queries[QUERY_ENSURE] = ensureRequestedPage;
   CONFIG.queries[QUERY_CONFIRM] = confirmPendingRequest;
   const module = game.modules.get(MODULE_ID);
   if (module) module.api = Object.freeze({
@@ -375,6 +383,7 @@ Hooks.once("ready", () => {
     openPersonal: actor => openNotes(actor, "personal"),
     openFromToken: token => openTokenNotes(token, "shared"),
     openPersonalFromToken: token => openTokenNotes(token, "personal"),
-    version: "0.2.1"
+    chooseFromToken: openTokenChooser,
+    version: "0.3.0"
   });
 });
