@@ -1,6 +1,6 @@
 import {
   MODULE_ID, subjectUuidForActor, subjectUuidForToken, resolveSubject,
-  playerMayNote, findJournal, ensureJournal, isValidScope
+  playerMayNote, findJournal, ensureJournal, isValidScope, isLegacyGeneratedTitle
 } from "./store.mjs";
 
 const QUERY_ENSURE = `${MODULE_ID}.ensure`;
@@ -120,9 +120,9 @@ async function ensureRequestedNotes(message) {
     if (existing && !existing.testUserPermission(requester, "OWNER")) {
       throw new Error("This Journal exists, but the GM must grant you Journal Owner access.");
     }
-    const entry = existing ?? await ensureJournal(subject, message.scope, requester.id, {
-      anonymous: message.source === "token"
-    });
+    // Reuse the original Journal and correct only an untouched v0.2.0
+    // short-UUID title. This never changes permissions, pages, or identity.
+    const entry = await ensureJournal(subject, message.scope, requester.id);
     return { journalId: entry.id };
   } catch (error) {
     console.error(`${MODULE_ID} | NPC note creation refused`, error);
@@ -169,10 +169,24 @@ async function openSubjectNotes(subjectUuid, scope, { source, tokenUuid = null }
     if (game.user.isGM) {
       const subject = await resolveSubject(subjectUuid);
       if (!subject) throw new Error("This NPC is no longer in the world.");
-      entry = await ensureJournal(subject, scope, game.user.id, { anonymous: source === "token" });
+      entry = await ensureJournal(subject, scope, game.user.id);
     } else {
       const id = await requestJournal(subjectUuid, scope, source, tokenUuid);
       entry = await waitForJournal(id);
+    }
+  } else if (isLegacyGeneratedTitle(entry, subjectUuid, scope, game.user.name)) {
+    // A player with Journal Owner permission may not be able to read an NPC's
+    // real Actor name. Ask the GM to resolve it rather than guessing from a
+    // token label. With no active GM, the old Journal still opens normally.
+    if (game.user.isGM) {
+      const subject = await resolveSubject(subjectUuid);
+      if (subject) entry = await ensureJournal(subject, scope, game.user.id);
+    } else if (game.users.activeGM && game.user.can?.("QUERY_USER")) {
+      try {
+        await requestJournal(subjectUuid, scope, source, tokenUuid);
+      } catch (error) {
+        console.warn(`${MODULE_ID} | Could not update the generated Journal title; existing notes remain usable.`, error);
+      }
     }
   }
   entry.sheet.render(true);
@@ -242,7 +256,7 @@ function addTokenHUDButton(app, html) {
   if (!isVisibleToken(token)) return;
   const root = html instanceof HTMLElement ? html : html?.[0] ?? app.element;
   if (!(root instanceof HTMLElement) || root.querySelector(".pnn-token-button")) return;
-  const container = root.querySelector(".col.right") ?? root.querySelector(".col.middle") ?? root;
+  const container = root.querySelector(".col.left") ?? root.querySelector(".col.middle") ?? root;
   const button = document.createElement("button");
   button.type = "button";
   button.className = "control-icon pnn-token-button";
@@ -281,7 +295,7 @@ function positionHoverButton() {
   if (typeof transform?.apply !== "function") { removeHoverButton(); return; }
   const token = hoveredToken;
   const point = transform.apply({
-    x: token.center.x + token.w * 0.43,
+    x: token.center.x - token.w * 0.43,
     y: token.center.y - token.h * 0.43
   });
   if (!Number.isFinite(point?.x) || !Number.isFinite(point?.y)) {
@@ -361,6 +375,6 @@ Hooks.once("ready", () => {
     openPersonal: actor => openNotes(actor, "personal"),
     openFromToken: token => openTokenNotes(token, "shared"),
     openPersonalFromToken: token => openTokenNotes(token, "personal"),
-    version: "0.2.0"
+    version: "0.2.1"
   });
 });

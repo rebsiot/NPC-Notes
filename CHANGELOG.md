@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1 - 2026-10-18 (beta, live verification pending)
+
+- Linked NPC notes now use the **Actor name** rather than the short internal UUID identifier: e.g., `Detective Marcus Reed - Party Notes`.
+- Unlinked NPC notes now use the **Token name plus the Scene where it was seen**: e.g., `Desk Sergeant [seen in Downtown Precinct] - Party Notes`.
+- Moved the hover book to the **upper-left side** of visible tokens, and the native Token HUD book to the left control column.
+- On reopening a v0.2.0 note with a generated short-UUID title, an online GM can correct **that one Journal name**. Exact preexisting UUID-generated titles are eligible; user-customized titles are never changed. No automatic bulk rename occurs. Existing note pages, IDs, links, flags and permissions remain intact. With no GM online, the old note still opens.
+- **GM privacy caution:** Linked Actor names now appear in shared player-owned Journal titles. An internal Actor name intended to remain secret may be disclosed. No Actor stats or biography are copied.
+- Retained module ID `player-npc-notes`, manifest URL, Journal association scheme, token visibility checks and party/personal permission rules.
+- Automated/mock tests: 43 passing under Node.js 22; JS syntax checks passed. Real Foundry v14, D&D 5e, PF2e and WoD20 tests not run for this build.
+- Back up the installed module folder and the world's Journals before updating; code rollback alone will not revert a native Journal title change.
+
 ## 0.2.0 - 2026-10-18 (beta, live verification pending)
 
 - Added a hover book shortcut on visible NPC tokens, including tokens players do not own. Left-click opens Party Notes; right-click opens personal notes. The existing owner/GM Token HUD button remains available.

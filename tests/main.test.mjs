@@ -27,7 +27,7 @@ class Node {
     this.style={}; this.listeners={}; this.parentElement=null;
   }
   querySelector(selector) {
-    if (selector === ".col.right") return this;
+    if (selector === ".col.left") return this;
     if (selector === ".pnn-token-button") return this.children.find(c => c.className.includes("pnn-token-button")) ?? null;
     return null;
   }
@@ -54,11 +54,11 @@ function makeActor(id, permitted = []) {
   actors.set(a.uuid,a);
   return a;
 }
-function makeToken(id, actor, { linked=true, sceneId="scA", visible=true, hidden=false }={}) {
+function makeToken(id, actor, { linked=true, sceneId="scA", sceneName="Old Town", tokenName, visible=true, hidden=false }={}) {
   const doc={
     id,documentName:"Token",uuid:`Scene.${sceneId}.Token.${id}`,
-    parent:{documentName:"Scene",id:sceneId},
-    actorId:actor.id, actorLink:linked,hidden,actor
+    parent:{documentName:"Scene",id:sceneId,name:sceneName},
+    name:tokenName ?? actor.name, actorId:actor.id, actorLink:linked,hidden,actor
   };
   const token={document:doc,isVisible:visible,isPreview:false,
     center:{x:250,y:280},w:100,h:100};
@@ -121,7 +121,7 @@ beforeEach(() => {
 
 test("API is system agnostic and includes token shortcut", () => {
   const api=gameModules.get("player-npc-notes").api;
-  assert.equal(api.version,"0.2.0");
+  assert.equal(api.version,"0.2.1");
   assert.equal(typeof api.openFromToken,"function");
   assert.equal(typeof api.openPersonalFromToken,"function");
   assert.equal(typeof CONFIG.queries["player-npc-notes.ensure"],"function");
@@ -149,7 +149,7 @@ test("old Actor sheet entry point remains permission-limited", () => {
 test("GM creates existing Actor-sheet party Journal and reuses it", async () => {
   const a=makeActor("A");
   const first=await openNotes(a,"shared");
-  assert.equal(first.name,"NPC A - Party Notes");
+  assert.equal(first.name,"Secret A - Party Notes");
   await openNotes(a,"shared");
   assert.equal(journal.length,1);
   assert.deepEqual(rendered,[first.id,first.id]);
@@ -161,7 +161,7 @@ test("player with no NPC Actor permission creates notes from visible token", asy
   game.user=users[1];
   assert.equal(a.testUserPermission(game.user,"LIMITED"),false);
   const entry=await openTokenNotes(token);
-  assert.equal(entry.name,"NPC A - Party Notes");
+  assert.equal(entry.name,"Secret A - Party Notes");
   assert.equal(entry.ownership.a,3);
   assert.equal(entry.ownership.b,3);
   assert.equal(journal.length,1);
@@ -190,6 +190,63 @@ test("unlinked tokens get independent Journal UUIDs", async () => {
   assert.equal(journal.length,2);
   assert.equal(journal[0].flags["player-npc-notes"].noteLink.subjectUuid,one.document.uuid);
   assert.equal(journal[1].flags["player-npc-notes"].noteLink.subjectUuid,two.document.uuid);
+});
+
+test("unlinked tokens use token names and map names instead of Actor names", async () => {
+  const a=makeActor("NPC",[]);
+  const one=makeToken("one",a,{linked:false,tokenName:"Officer Morgan",sceneName:"Downtown Precinct"});
+  const two=makeToken("two",a,{linked:false,tokenName:"Officer Morgan",sceneName:"Nightclub"});
+  const first=await openTokenNotes(one);
+  const second=await openTokenNotes(two);
+  assert.equal(first.name,"Officer Morgan [seen in Downtown Precinct] - Party Notes");
+  assert.equal(second.name,"Officer Morgan [seen in Nightclub] - Party Notes");
+  assert.notEqual(first.id,second.id);
+});
+
+test("player reopens an old UUID-generated Journal and GM fixes just its title", async () => {
+  const a=makeActor("NPC",[]);
+  const token=makeToken("one",a);
+  const old=makeEntry({
+    name:"NPC NPC - Party Notes",ownership:{default:0,a:3,b:3},
+    pages:[{text:{content:"<p>Keep these notes</p>"}}],
+    flags:{"player-npc-notes":{noteLink:{schema:1,subjectUuid:a.uuid,scope:"shared"}}}
+  });
+  const beforePages=old.pages, beforeRights=old.ownership, beforeFlags=old.flags;
+  game.user=users[1];
+  const entry=await openTokenNotes(token);
+  assert.strictEqual(entry,old);
+  assert.equal(entry.name,"Secret NPC - Party Notes");
+  assert.strictEqual(entry.pages,beforePages);
+  assert.strictEqual(entry.ownership,beforeRights);
+  assert.strictEqual(entry.flags,beforeFlags);
+  assert.equal(journal.length,1);
+  assert.equal(queries.length,2);
+});
+
+test("a customized Journal title is never overwritten during token access", async () => {
+  const a=makeActor("NPC",[]); const token=makeToken("one",a);
+  const old=makeEntry({name:"Known as the Informant",ownership:{default:0,a:3},
+    flags:{"player-npc-notes":{noteLink:{schema:1,subjectUuid:a.uuid,scope:"shared"}}}
+  });
+  game.user=users[1];
+  await openTokenNotes(token);
+  assert.equal(old.name,"Known as the Informant");
+  assert.equal(queries.length,0);
+});
+
+test("existing generated notes still open when GM is offline", async () => {
+  const a=makeActor("NPC",[]);const token=makeToken("one",a);
+  const old=makeEntry({name:"NPC NPC - Party Notes",ownership:{default:0,a:3},
+    flags:{"player-npc-notes":{noteLink:{schema:1,subjectUuid:a.uuid,scope:"shared"}}}
+  });
+  // An offline GM may remain the current activeGM mock; requests are bypassed explicitly.
+  users[0].active=false;
+  Object.defineProperty(game.users,"activeGM",{get(){return null;},configurable:true});
+  game.user=users[1];
+  await openTokenNotes(token);
+  assert.equal(old.name,"NPC NPC - Party Notes");
+  assert.deepEqual(rendered,[old.id]);
+  assert.equal(queries.length,0);
 });
 
 test("existing Journal access is never automatically broadened", async () => {
@@ -301,7 +358,7 @@ test("hover icon appears for a visible NPC not owned by player", () => {
   assert.equal(board.children.length,1);
   assert.equal(board.children[0].className,"pnn-hover-button");
   assert.equal(board.children[0].attrs["aria-label"],"Open NPC Party Notes");
-  assert.equal(board.children[0].style.left,"279px");
+  assert.equal(board.children[0].style.left,"193px");
   callback("hoverToken")(token,true);
   assert.equal(board.children.length,1);
   callback("canvasTearDown")();

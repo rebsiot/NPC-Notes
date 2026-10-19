@@ -3,7 +3,7 @@ import { beforeEach, test } from "node:test";
 import {
   MODULE_ID, subjectUuidForActor, subjectUuidForToken, resolveSubject,
   playerMayNote, isValidScope, journalKey, findJournal, buildOwnership,
-  ensureJournal
+  ensureJournal, journalTitle, isLegacyGeneratedTitle
 } from "../scripts/store.mjs";
 
 let actors, users, journal, folders, created, updated, folderCreations, actorWrites;
@@ -87,7 +87,7 @@ test("resolution accepts only saved world Actor or placed Token UUIDs", async ()
   actors.set("Scene.scA.Token.tokA",doc);
   assert.deepEqual(await resolveSubject(a.uuid),{actor:a,subjectUuid:a.uuid});
   assert.deepEqual(await resolveSubject("Scene.scA.Token.tokA"),{
-    actor:a,subjectUuid:"Scene.scA.Token.tokA",sceneId:"scA"
+    actor:a,token:doc,subjectUuid:"Scene.scA.Token.tokA",sceneId:"scA"
   });
   assert.equal(await resolveSubject("Compendium.foo.Actor.a"),null);
   assert.equal(await resolveSubject("Actor.unknown"),null);
@@ -133,7 +133,7 @@ test("new personal Journals only give rights to the author", () => {
 test("a shared note stores one Journal with a page, not an Actor mutation", async () => {
   const a=actor("foo",[]);
   const entry=await ensureJournal({actor:a,subjectUuid:a.uuid},"shared","playerA",{anonymous:true});
-  assert.equal(entry.name,"NPC foo - Party Notes");
+  assert.equal(entry.name,"Secret Actor foo - Party Notes");
   assert.equal(entry.pages[0].type,"text");
   assert.equal(entry.pages[0].text.content,"<p></p>");
   assert.equal(entry.pages[0].text.format,1);
@@ -144,10 +144,58 @@ test("a shared note stores one Journal with a page, not an Actor mutation", asyn
   assert.equal(actorWrites,0);
 });
 
-test("GM-created party notes still conceal the Actor name from the party", async () => {
+test("linked notes use the real Actor name rather than a UUID fragment", async () => {
   const a=actor("foo");
   const entry=await ensureJournal({actor:a,subjectUuid:a.uuid},"shared","playerA");
-  assert.equal(entry.name,"NPC foo - Party Notes");
+  assert.equal(entry.name,"Secret Actor foo - Party Notes");
+});
+
+test("unlinked token names include their Scene and preserve the Token's own label", async () => {
+  const a=actor("foo");
+  const token={name:"Desk Sergeant",parent:{name:"Downtown Police Precinct"}};
+  const subject={actor:a,token,subjectUuid:"Scene.scA.Token.tokA"};
+  const entry=await ensureJournal(subject,"shared","playerA");
+  assert.equal(entry.name,"Desk Sergeant [seen in Downtown Police Precinct] - Party Notes");
+  assert.equal(entry.flags[MODULE_ID].noteLink.subjectUuid,subject.subjectUuid);
+  const personal=await ensureJournal(subject,"personal","playerA");
+  assert.equal(personal.name,"Desk Sergeant [seen in Downtown Police Precinct] - User playerA Notes");
+});
+
+test("only exact v0.2.0 generated titles are repaired on access", async () => {
+  const a=actor("foo"); const subject={actor:a,subjectUuid:a.uuid};
+  const entry=fakeJournal({
+    name:"NPC foo - Party Notes", ownership:{default:0,playerA:3},
+    pages:[{text:{content:"<p>My old notes stay put</p>"}}],
+    flags:{[MODULE_ID]:{noteLink:{schema:1,subjectUuid:a.uuid,scope:"shared"}}}
+  });
+  assert.equal(isLegacyGeneratedTitle(entry,subject.subjectUuid,"shared"),true);
+  const reopened=await ensureJournal(subject,"shared","playerA");
+  assert.strictEqual(reopened,entry);
+  assert.equal(entry.name,"Secret Actor foo - Party Notes");
+  assert.deepEqual(updated,[{id:entry.id,change:{name:"Secret Actor foo - Party Notes"}}]);
+  assert.equal(entry.pages[0].text.content,"<p>My old notes stay put</p>");
+  assert.deepEqual(entry.ownership,{default:0,playerA:3});
+  assert.equal(created.length,0);
+  assert.strictEqual(await ensureJournal(subject,"shared","playerB"),entry);
+  assert.equal(updated.length,1);
+});
+
+test("user-customized titles and unrelated Journal names remain unchanged", async () => {
+  const a=actor("foo"); const subject={actor:a,subjectUuid:a.uuid};
+  const custom=fakeJournal({name:"We met the captain",ownership:{default:0,playerA:3},
+    flags:{[MODULE_ID]:{noteLink:{schema:1,subjectUuid:a.uuid,scope:"shared"}}}
+  });
+  assert.equal(isLegacyGeneratedTitle(custom,subject.subjectUuid,"shared"),false);
+  await ensureJournal(subject,"shared","playerA");
+  assert.equal(custom.name,"We met the captain");
+  assert.equal(updated.length,0);
+});
+
+test("title builder falls back safely for an unnamed scene but keeps the UUID key", () => {
+  const a=actor("foo");
+  assert.equal(journalTitle({actor:a,subjectUuid:"Actor.foo"},"shared"),"Secret Actor foo - Party Notes");
+  assert.equal(journalTitle({actor:a,subjectUuid:"Scene.scA.Token.tokA",token:{name:"Watchman",parent:{}}},"shared"),
+    "Watchman [seen in Unknown Scene] - Party Notes");
 });
 
 test("personal notes are never returned as party or another player's", async () => {
