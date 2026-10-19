@@ -1,0 +1,3 @@
+.pnn-chooser p { margin: 0 0 0.7rem; line-height: 1.4; }
+.pnn-token-button { cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.pnn-token-button i { pointer-events: none; }
