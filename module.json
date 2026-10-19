@@ -1,8 +1,8 @@
 {
   "id": "player-npc-notes",
-  "title": "Player NPC Notes",
+  "title": "AFT NPC Notes",
   "description": "Party and personal Journal notes linked to NPC Actors, without giving players permission to edit the Actor.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "compatibility": {
     "minimum": "14"
   },
@@ -15,6 +15,6 @@
   "readme": "https://github.com/rebsiot/NPC-Notes/blob/main/README.md",
   "url": "https://github.com/rebsiot/NPC-Notes",
   "manifest": "https://raw.githubusercontent.com/rebsiot/NPC-Notes/main/module.json",
-  "download": "https://raw.githubusercontent.com/rebsiot/NPC-Notes/main/releases/player-npc-notes-0.1.0.zip",
+  "download": "https://raw.githubusercontent.com/rebsiot/NPC-Notes/main/releases/player-npc-notes-0.1.1.zip",
   "changelog": "https://github.com/rebsiot/NPC-Notes/blob/main/CHANGELOG.md"
 }

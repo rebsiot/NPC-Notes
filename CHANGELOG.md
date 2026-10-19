@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.1 - 2026-10-18 (beta, not live-verified)
+
+- Displayed module name changed to **AFT NPC Notes**. Internal component name is **G06-NPC Notes**.
+- New note Journal folders and the Token HUD tooltip use the updated name. Existing module-created folders and Journal notes remain unchanged and continue to be reused by their flags.
+- Unchanged module ID `player-npc-notes`, native Journal association flags, Actor permission requirements, and manifest URL. This is a name-only release, not a new permission model.
+- Automated/mock tests and syntax checks rerun for v0.1.1; live Foundry v14, D&D 5e, PF2e and WoD20 verification remains pending.
+- Upgrade with the same Foundry manifest. Back up the module and world Journals before testing; the previous v0.1.0 ZIP is retained for rollback.
+
+
 ## 0.1.0 - 2026-10-18 (beta, not live-verified)
 
 ### Added

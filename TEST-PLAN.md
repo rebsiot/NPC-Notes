@@ -1,10 +1,10 @@
 # G06 Live smoke-test plan (not yet performed)
 
-Target Foundry v14; test in an isolated world or restored copy, with one GM and at least two distinct real player logins. Record the exact Foundry and system versions, module 0.1.0, date, each step and result.
+Target Foundry v14; test in an isolated world or restored copy, with one GM and at least two distinct real player logins. Record the exact Foundry and system versions, module 0.1.1, date, each step and result.
 
-1. **Install/start:** enable module, reload clients; confirm no errors and that module.json matches `player-npc-notes` 0.1.0.
+1. **Install/start:** enable module, reload clients; confirm no errors and that module.json matches `player-npc-notes` 0.1.1.
 2. **Permissions setup:** Create two NPCs: one with Actor Limited for Alice/Bob, another None. Confirm the players cannot edit NPC stats or see protected GM sheet information. Visibility depends on the game system.
-3. **First party note:** Alice opens the Limited NPC sheet; click Player Notes > Party Notes. With GM online, an editable native Journal appears. Note is only created once. Confirm sidebar entry is in `Player NPC Notes` folder.
+3. **First party note:** Alice opens the Limited NPC sheet; click Player Notes > Party Notes. With GM online, an editable native Journal appears. Note is only created once. Confirm sidebar entry is in `AFT NPC Notes` folder.
 4. **Shared round-trip:** Alice writes and saves a distinct note. Bob opens the same NPC and sees/edits the same Journal. Alice sees Bob's saved change after reopening. GM can read it.
 5. **Personal privacy:** Alice creates My Notes. Bob cannot find/open Alice's Journal by directory, UUID link or attempted direct open. Bob creates his own My Notes with independent contents. GM can view both. Alice can edit her own.
 6. **No NPC mutation:** Compare the saved NPC before/after note creation (stats, descriptions, inventory, flags and ownership). Check no unintended change, and confirm standard Foundry Actor controls still work.

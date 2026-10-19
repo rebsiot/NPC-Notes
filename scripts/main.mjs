@@ -21,7 +21,7 @@ function escapeHtml(value) {
 
 function notifyError(error) {
   console.error(`${MODULE_ID} |`, error);
-  ui.notifications.error(error?.message || "Player NPC Notes encountered an error.");
+  ui.notifications.error(error?.message || "AFT NPC Notes encountered an error.");
 }
 
 function mayOpen(actor) {
@@ -192,8 +192,8 @@ function addTokenHUDButton(app, html) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "control-icon pnn-token-button";
-  button.title = "Player NPC Notes";
-  button.setAttribute("aria-label", "Player NPC Notes");
+  button.title = "AFT NPC Notes";
+  button.setAttribute("aria-label", "AFT NPC Notes");
   const icon = document.createElement("i");
   icon.className = "fas fa-book-open";
   icon.setAttribute("aria-hidden", "true");
@@ -225,7 +225,7 @@ Hooks.once("ready", () => {
     open: openChooser,
     openShared: actor => openNotes(actor, "shared"),
     openPersonal: actor => openNotes(actor, "personal"),
-    version: "0.1.0"
+    version: "0.1.1"
   });
   // Only existing module-managed shared Journals are touched, and only to
   // enforce the Actor's CURRENT visibility. Note content is never rewritten.

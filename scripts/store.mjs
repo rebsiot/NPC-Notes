@@ -1,5 +1,5 @@
 /**
- * G06 Player NPC Notes - world Journal storage. No writes to Actor/Token documents.
+ * G06-NPC Notes (AFT NPC Notes) - world Journal storage. No writes to Actor/Token documents.
  * The Journal flags, not its name or folder location, define the association.
  */
 export const MODULE_ID = "player-npc-notes";
@@ -83,7 +83,7 @@ async function ensureFolder() {
   );
   if (found) return found;
   return Folder.implementation.create({
-    name: "Player NPC Notes",
+    name: "AFT NPC Notes",
     type: "JournalEntry",
     flags: { [MODULE_ID]: { [FOLDER_FLAG]: true } }
   });

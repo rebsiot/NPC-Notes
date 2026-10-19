@@ -82,7 +82,7 @@ test("registers a working module API without a game-system dependency", () => {
   assert.equal(typeof api.open,"function");
   assert.equal(typeof api.openShared,"function");
   assert.equal(typeof api.openPersonal,"function");
-  assert.equal(api.version,"0.1.0");
+  assert.equal(api.version,"0.1.1");
   assert.equal(typeof CONFIG.queries["player-npc-notes.ensure"],"function");
   assert.equal(typeof CONFIG.queries["player-npc-notes.confirm"],"function");
 });
@@ -219,7 +219,7 @@ test("token HUD notes control appears only on accessible NPCs and does not dupli
   callbackHUD({object:{actor:npc}},root);
   callbackHUD({object:{actor:npc}},root);
   assert.equal(root.children.length,1);
-  assert.equal(root.children[0].title,"Player NPC Notes");
+  assert.equal(root.children[0].title,"AFT NPC Notes");
   const denied=makeActor("denied",[]);
   const root2=new Element();
   callbackHUD({object:{actor:denied}},root2);
