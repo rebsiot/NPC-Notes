@@ -1,6 +1,6 @@
 /**
- * G06-NPC Notes (AFT NPC Notes) - world Journal storage. No writes to Actor/Token documents.
- * The Journal flags, not its name or folder location, define the association.
+ * G06-NPC Notes (AFT NPC Notes): journal associations, independent of Actor ownership.
+ * Existing Journal associations and permissions are never rewritten by an upgrade.
  */
 export const MODULE_ID = "player-npc-notes";
 export const JOURNAL_FLAG = "noteLink";
@@ -11,9 +11,19 @@ const inflight = new Map();
 
 export function subjectUuidForActor(actor) {
   if (!actor || actor.documentName !== "Actor") return null;
-  // A synthetic (unlinked) Token Actor is one NPC instance, not its template.
   if (actor.token && !actor.token.actorLink) return actor.token.uuid ?? null;
   return actor.uuid ?? null;
+}
+
+/** Identifies a linked Actor across scenes, or one particular unlinked Token. */
+export function subjectUuidForToken(token) {
+  const doc = token?.document?.documentName === "Token" ? token.document : token;
+  if (doc?.documentName !== "Token" || typeof doc.uuid !== "string") return null;
+  if (doc.actorLink) {
+    if (!/^[A-Za-z0-9]+$/.test(doc.actorId ?? "")) return null;
+    return `Actor.${doc.actorId}`;
+  }
+  return doc.uuid;
 }
 
 export async function resolveSubject(subjectUuid, lookup = globalThis.fromUuid) {
@@ -29,6 +39,7 @@ export async function resolveSubject(subjectUuid, lookup = globalThis.fromUuid) 
   return null;
 }
 
+/** Previous sheet-based workflow remains available for Actors with Limited access. */
 export function playerMayNote(actor, user) {
   return Boolean(actor && user && actor.testUserPermission?.(user, "LIMITED"));
 }
@@ -54,27 +65,25 @@ export function findJournal(journals, subjectUuid, scope, userId) {
   }) ?? null;
 }
 
-export function buildOwnership(actor, scope, userId, users, levels) {
-  const none = levels.NONE;
-  const owner = levels.OWNER;
-  const ownership = { default: none };
+/**
+ * Journals have their own permissions. New party notes are explicitly shared
+ * with the world players; personal notes only with their author and GMs.
+ * These defaults apply at CREATE time only: preexisting Journal permissions
+ * are always left untouched, including journals made by prior versions.
+ */
+export function buildOwnership(_actor, scope, userId, users, levels) {
+  const ownership = { default: levels.NONE };
   if (scope === "personal") {
     const user = Array.from(users).find(u => u.id === userId);
     if (!user) throw new Error("The requested player is no longer in this world.");
-    if (!user.isGM) ownership[user.id] = owner;
+    if (!user.isGM) ownership[user.id] = levels.OWNER;
   } else if (scope === "shared") {
     for (const user of users) {
       if (user.isGM || user.role === 0) continue;
-      if (playerMayNote(actor, user)) ownership[user.id] = owner;
+      ownership[user.id] = levels.OWNER;
     }
   } else throw new Error("Unknown notes scope.");
   return ownership;
-}
-
-export function ownershipDiffers(current, expected) {
-  const a = current ?? {};
-  const keys = new Set([...Object.keys(a), ...Object.keys(expected)]);
-  return Array.from(keys).some(k => (a[k] ?? 0) !== (expected[k] ?? 0));
 }
 
 async function ensureFolder() {
@@ -89,12 +98,7 @@ async function ensureFolder() {
   });
 }
 
-async function ensureSharedPermissions(entry, actor) {
-  const expected = buildOwnership(actor, "shared", null, game.users, CONST.DOCUMENT_OWNERSHIP_LEVELS);
-  if (ownershipDiffers(entry.ownership, expected)) await entry.update({ ownership: expected });
-}
-
-export async function ensureJournal(subject, scope, userId) {
+export async function ensureJournal(subject, scope, userId, { anonymous = false } = {}) {
   if (!game.user?.isGM) throw new Error("A GM must create NPC note Journals.");
   if (!subject?.actor || !subject.subjectUuid || !isValidScope(scope)) {
     throw new Error("Invalid NPC note request.");
@@ -104,15 +108,15 @@ export async function ensureJournal(subject, scope, userId) {
   if (inflight.has(key)) return inflight.get(key);
   const work = (async () => {
     const existing = findJournal(game.journal, subject.subjectUuid, scope, userId);
-    if (existing) {
-      if (scope === "shared") await ensureSharedPermissions(existing, subject.actor);
-      return existing;
-    }
+    // Critical: do not modify an existing Journal's permissions or contents.
+    if (existing) return existing;
     const folder = await ensureFolder();
-    const requestingUser = game.users.get(userId);
+    const requester = game.users.get(userId);
+    const suffix = subject.subjectUuid.split(".").at(-1).slice(-6);
+    const visibleLabel = (anonymous || scope === "shared") ? `NPC ${suffix}` : subject.actor.name;
     const title = scope === "shared"
-      ? `${subject.actor.name} - Party Notes`
-      : `${subject.actor.name} - ${requestingUser.name} Notes`;
+      ? `${visibleLabel} - Party Notes`
+      : `${visibleLabel} - ${requester.name} Notes`;
     const ownership = buildOwnership(subject.actor, scope, userId, game.users, CONST.DOCUMENT_OWNERSHIP_LEVELS);
     const entry = await JournalEntry.implementation.create({
       name: title,
@@ -140,23 +144,4 @@ export async function ensureJournal(subject, scope, userId) {
   inflight.set(key, work);
   try { return await work; }
   finally { inflight.delete(key); }
-}
-
-/** Only entries created by this module have their access re-synchronized. */
-export async function syncSharedJournals(onlySubjectUuid = null) {
-  if (!game.user?.isGM || game.users.activeGM?.id !== game.user.id) return 0;
-  let count = 0;
-  for (const entry of game.journal) {
-    const link = journalLink(entry);
-    if (link?.schema !== SCHEMA || link.scope !== "shared") continue;
-    if (onlySubjectUuid && link.subjectUuid !== onlySubjectUuid) continue;
-    const subject = await resolveSubject(link.subjectUuid);
-    if (!subject) continue; // An orphaned note is preserved, never deleted.
-    const expected = buildOwnership(subject.actor, "shared", null, game.users, CONST.DOCUMENT_OWNERSHIP_LEVELS);
-    if (ownershipDiffers(entry.ownership, expected)) {
-      await entry.update({ ownership: expected });
-      count++;
-    }
-  }
-  return count;
 }

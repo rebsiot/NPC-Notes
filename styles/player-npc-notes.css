@@ -1,3 +1,29 @@
 .pnn-chooser p { margin: 0 0 0.7rem; line-height: 1.4; }
 .pnn-token-button { cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .pnn-token-button i { pointer-events: none; }
+
+/* Hover shortcut is separate from the native owner-only Token HUD. */
+.pnn-hover-button {
+  position: absolute;
+  z-index: 85;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--color-border-dark-primary, #444);
+  border-radius: 6px;
+  background: var(--color-bg-option, rgba(25, 25, 25, 0.93));
+  color: var(--color-text-light-highlight, #f4f4f4);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  cursor: pointer;
+}
+.pnn-hover-button:hover,
+.pnn-hover-button:focus-visible {
+  background: var(--color-bg-btn-hover, #484848);
+  outline: 2px solid var(--color-border-highlight-alt, #dca657);
+  outline-offset: 1px;
+}
+.pnn-hover-button i { pointer-events: none; }

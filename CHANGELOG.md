@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.0 - 2026-10-18 (beta, live verification pending)
+
+- Added a hover book shortcut on visible NPC tokens, including tokens players do not own. Left-click opens Party Notes; right-click opens personal notes. The existing owner/GM Token HUD button remains available.
+- Journals remain linked by Actor UUID for linked tokens and placed Token UUID for unlinked tokens. Previous `noteLink` flags and existing notes are retained without migration.
+- No Actor permission is needed for the token shortcut. New party Journals receive their own explicit Player Journal Owner access; private Journals retain author-only plus GM access. Actor sheets/statistics remain unchanged.
+- Existing Journals keep their exact permissions: automatic Actor-to-Journal permission synchronization from previous releases is removed. GMs can adjust Journal ownership manually where needed, avoiding silent disclosure of prior notes.
+- GM-side first-create requests validate a same-scene Token UUID and the player's reciprocal client-visible token confirmation. Hidden, out-of-scene and no-visibility UI cases are refused.
+- New shared Journals use generic titles to avoid revealing GM-only Actor names. The party can rename its own notes to an identified NPC name.
+- Preserved the unchanged Foundry module ID (`player-npc-notes`), manifest URL, folder flag, Journal note flags, Actor-sheet compatibility, existing personal notes and all user content.
+- Node.js 22: 35 automated/mock tests pass; syntax checks pass. **No live Foundry v14, D&D 5e, PF2e or WoD20 tests have been run.** The hover control and GM/player permissions must be checked in a test world.
+- Back up both your module folder and world Journals before upgrading. For rollback, restore the previous full module folder/ZIP. Code rollback alone does not reverse native Journal edits or permissions.
+
+
 ## 0.1.1 - 2026-10-18 (beta, not live-verified)
 
 - Displayed module name changed to **AFT NPC Notes**. Internal component name is **G06-NPC Notes**.

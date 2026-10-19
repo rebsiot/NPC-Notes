@@ -1,89 +1,83 @@
 # AFT NPC Notes
 
-**Version:** 0.1.1 beta (2026-10-18)  
-**Target:** Foundry VTT v14; game-system independent by design  
-**Status:** Automated/mock tested. NOT yet verified in a live Foundry world.
+**v0.2.0 beta** | **Foundry VTT v14 target** | **System independent**
 
-Give players a simple place to record what they learn about an NPC, without giving them ownership of its character sheet. Notes use normal Foundry Journal Entries and the native Journal editor.
+A book icon appears when players hover over a visible NPC token. Click it to open the group's notes about that character. Players do **not** need Limited, Observer or Owner access to the NPC Actor sheet. Notes are real Foundry Journal Entries, not a second character sheet.
 
-## What it does
+**Status:** Automated/mock-tested; not yet verified in a live Foundry world. D&D 5e, PF2e and WoD20 are intended test systems, not live compatibility certifications.
 
-- Adds **Player Notes** to Actor-sheet header controls and the Token HUD where the Actor is accessible.
-- **Party Notes:** one Journal associated with that NPC, editable by players who have at least **Limited** permission to the Actor.
-- **My Notes:** one separate Journal per player/NPC, visible to that player and all GMs, not to other players by default.
-- Creates the Journal automatically on first use through an online GM client using Foundry v14 user queries, **without** giving players general Journal creation permission.
-- Never changes NPC stats, descriptions, items, GM notes or ownership to enable note-taking.
-- Reuses existing module-created Journals on repeated clicks; one `AFT NPC Notes` folder holds them. Previously created, flagged folders are reused without renaming.
+## What you can do
 
-Notes are associated using module flags on the **Journal**, not on the Actor. Linked tokens use the source world Actor identity; unlinked tokens use their own placed Token UUID so separate instances of generic NPCs can have separate notes.
+- **Hover over a visible NPC token** and click the book to open **Party Notes**. A new Journal is created on the first visit when a GM is online.
+- **Right-click the book** to open your **personal notes** for the NPC. They are visible only to you and GMs by default.
+- **Use the regular Token HUD book icon** as GM or token owner. The hover icon exists because Foundry normally does not show the native Token HUD to players for unowned NPCs.
+- **Keep one Journal per NPC identity.** Linked tokens use the world Actor UUID; unlinked tokens each use their placed Token UUID. The same NPC's notes reopen on subsequent visits.
+- **Edit with Foundry's native Journal editor.** No NPC statistics, descriptions, ownership, flags or game-system data are changed by the module.
 
-## Install with a manifest (beta)
+## Install in Foundry
 
-In Foundry Setup, choose **Add-on Modules > Install Module**, paste this URL into **Manifest URL**, then install:
+In Foundry **Setup > Add-on Modules > Install Module**, paste this into **Manifest URL**:
 
 ```text
 https://raw.githubusercontent.com/rebsiot/NPC-Notes/main/module.json
 ```
 
-The manifest downloads the complete v0.1.1 ZIP from this repository. The ZIP and manifest must both be available over HTTPS before trying the URL. After installation, enable the module in **Manage Modules** within the intended world. Keep a backup of your world Journals before testing.
+Enable **AFT NPC Notes** in **Manage Modules** inside your world, then reload the clients. Manual ZIP installation is also possible: extract the release ZIP so `Data/modules/player-npc-notes/module.json` exists immediately inside that folder, with no extra nested folder. Stop Foundry before replacing installed module files. For the St. Louis server using Samba, that path is `Z:\Data\modules\player-npc-notes`.
 
-## Manual ZIP installation (alternative)
+**Before upgrading from v0.1.0/v0.1.1**, back up `Data/modules/player-npc-notes` and take a recoverable backup of your Foundry world's Journal data. Test this release in a separate world before using important campaign notes.
 
-1. Make a recoverable backup of the test world's Journal Entries and of any existing `player-npc-notes` module folder. Test on a backup/test world first.
-2. Stop Foundry before changing module files.
-3. Extract the install ZIP so `Data/modules/player-npc-notes/module.json` exists directly in the module folder. There must not be an extra nested `player-npc-notes` folder.
-4. Restart Foundry. In the desired world, open **Manage Modules**, enable **AFT NPC Notes**, and reload the clients.
-5. The GM should grant players **Limited** (or greater) Actor permission on the NPCs they are meant to annotate. Players do **not** need Actor Owner permission or general Journal creation rights.
+## How permissions work
 
-For the St. Louis server using Samba, the module directory is `Z:\Data\modules\player-npc-notes`. `Z:\` is the user-data root, not Foundry's `Data` directory.
+Actor permissions and Journal permissions are independent:
 
-**Repository:** https://github.com/rebsiot/NPC-Notes  
-**Install ZIP:** https://raw.githubusercontent.com/rebsiot/NPC-Notes/main/releases/player-npc-notes-0.1.1.zip
+- The player needs to be able to **see the NPC token on their current scene**, but receives **no access to the NPC's stat sheet**.
+- **New Party Notes** Journals grant Journal **Owner** permission to current player-role users, with default **None**; GMs retain Foundry's normal access. Party notes are intended to be shared across the party. The GM can adjust individual Journal permissions using Foundry's native ownership controls. This does not grant Actor permission.
+- **New My Notes** Journals grant Journal Owner to only that player (and implicit GM access).
+- **Existing v0.1.0/v0.1.1 Journals retain their original text, flags and ownership.** The module deliberately stops automatic permission synchronization to Actor ownership. If an existing Journal does not allow a player to edit it, the GM must grant Journal Owner access to that particular Journal. Nothing is silently shared or migrated.
+- New player accounts added later are not automatically granted Owner on earlier Journals. Manage existing Journal access in Foundry.
 
-The current beta uses a versioned ZIP stored in the public GitHub repository, not a GitHub Release asset. This is a real distribution URL after publication, but not a claim of Foundry live compatibility.
+The first Journal for an NPC requires an **online GM client** to create the native Journal. Normal players do not need general permission to create Journals; the module uses Foundry v14 `User.query` with a reciprocal, pending-request confirmation and checks the clicked Token UUID, viewed Scene and client-visible Token state. Players need Foundry's **Query Other Users** permission for that first-create request. Existing Journals can be reopened when the GM is offline if the player already has Journal permission.
 
-## Use
+The GM-created Journal has a generic title such as `NPC abc123 - Party Notes` so an internal NPC Actor name is not disclosed. The GM (or an authorized Journal Owner) can rename it to a name the party knows. No GM biography, Actor statistics or secret data are copied into notes. Do not put GM secrets into player-owned Journals.
 
-1. Open an NPC Actor sheet and use the **Player Notes** header control, or use the book icon on the NPC Token HUD.
-2. Click **Party Notes** or **My Notes**.
-3. The existing Journal opens, or a new Journal is created if none exists. Edit its **Notes** page with the normal Foundry editor.
-4. Open the same NPC again to return to the same Journal. Party notes are shared; personal notes stay in separate Journals.
+## Actor UUID and token instances
 
-A GM must be connected for the **first creation** of a Journal unless the GM is opening it themselves. Players must have Foundry's **Query Other Users** permission (normally enabled) to request GM-assisted creation. Once created, players can use their existing Journals even when no GM is online, subject to existing Journal permissions. A player with no Actor permission will not see the module's action even if the token artwork is visible.
+Association data is stored **only on the module-managed Journal** in flag `player-npc-notes.noteLink`, using `{schema:1, subjectUuid, scope, userId?}`. This matches previous releases.
 
-## Privacy and permissions
+- **Linked token:** `Actor.<id>`; the same NPC on another scene reopens the same notes.
+- **Unlinked token:** `Scene.<sceneId>.Token.<tokenId>`; independent clones of a generic NPC have distinct notes.
 
-- NPC Actor permission and Journal permission are separate. The module never gives players Actor **Owner** permission.
-- Party Journals use explicit **Owner** permission for all non-GM users with at least Actor **Limited** access, and default **None** for other users.
-- Personal Journals use **Owner** for the requesting player, default **None** for other players. **GMs can read personal Journals.** They are not secret from the GM.
-- The active GM rechecks permissions on managed party Journals at login and when Actor ownership or user roles change. It can grant/revoke Journal access accordingly without changing note content.
-- A Journal Owner can edit that Journal under Foundry's normal rules. This module does not replace Foundry's document security model or guarantee that external journal-sharing modules cannot alter visibility.
-- **Important:** What a player can see on an NPC Actor with Limited permission differs by game system and sheet. Confirm that system-specific sheets do not disclose GM secrets at Limited permission before enabling this for NPCs.
-- The module acts only on Journals with its own association flag. It will not adopt, overwrite or migrate ordinary Journals or automatically attach notes to every NPC.
+If an NPC Actor or unlinked Token is deleted, its Journal is preserved rather than automatically deleted. There is no import/migration of unrelated Journals, no automatic hotbar assignment, and no change to macros or game-system rolls.
 
-## Limitations
+## Known limitations
 
-- Native Actor-sheet headers and Token HUDs may vary across system sheets; exact D&D 5e, PF2e and WoD20 user-interface compatibility is **not yet live-tested**.
-- There is no built-in GM migration tool for importing notes from other modules in 0.1.1.
-- Notes for deleted Actors or tokens are preserved as orphaned Journals; no automatic deletion or reassociation occurs.
-- If an unlinked token is deleted, its instance-specific notes remain in the Journal folder but the original UUID no longer resolves.
-- GM-owned shared Journal permission may be affected by independent modules that change Journal permissions or Actor visibility.
-- This is a publicly accessible beta repository, **not** an official Foundry package listing. No open-source reuse license has been selected; public read/download access is not an unrestricted license to redistribute or modify it.
+- **Live UI test pending:** Confirm hover icon alignment, token and overlay interaction, and native Journal creation in Foundry v14 with real GM and player sessions. Also repeat in D&D 5e, PF2e and WoD20; sheet/HUD customizations may differ by system.
+- A token must be on the player's current Scene and visible to that client. Hidden/invisible or different-scene Tokens are rejected by the module's normal UI path. This is a normal game-UI restriction, not a claim of cryptographic protection against a malicious browser client.
+- A first-time Journal cannot be created while all GMs are offline. Previously created Journals remain in the world's Journal directory.
+- A token's original world UUID may no longer resolve after deletion or replacement. The original Journal remains in the directory and is not silently reassigned.
+- For older shared Journals, player access might need a manual Journal ownership change. This is deliberate to prevent retroactive disclosure.
+- An outside module that rewrites Journal permissions or hover/HUD rendering might conflict; check those features in a test world.
+- This is a GitHub-distributed beta, not an official Foundry listing. The public repository has no adopted open-source reuse license; public download is not permission to relicense or redistribute the code.
 
 ## Upgrade and rollback
 
-Before upgrading, back up both the module folder and your **world's Journal Entries**. Replacing source code never substitutes for a world-data backup. Keep the old ZIP and world snapshot.
+The module ID remains **`player-npc-notes`**, not `G06` and not the new displayed title **AFT NPC Notes**. The stable manifest URL has not changed.
 
-To roll back a code-only upgrade, disable the module, stop Foundry, restore the former module folder, and restart. Existing note Journals are intentionally **not deleted** if you disable/remove the module. Those Journals remain as normal Foundry documents; players retain whatever permissions were last assigned to them. Reverting code does **not** revert edits to Journal text or ownership; restore the matching world snapshot if that is required. Do not bulk-delete `AFT NPC Notes` or earlier `Player NPC Notes` Journals without individual review and a backup.
+Back up the module folder and a matching world Journal snapshot. Disable the module and stop Foundry before restoring the v0.1.1 module folder/ZIP. Re-enable and reload. **Existing Journals persist** if you disable or roll back the module; code rollback does not undo Journal edits or permission changes made through the Journal editor. Restore the matching world snapshot only if you need to restore world-document changes.
 
-## Testing
+## Development and testing
 
-From source: run `npm test` and `npm run check` with Node.js 20+. These are mock/static tests, **not** a live Foundry verification. See [TEST-PLAN.md](TEST-PLAN.md) for the required GM/player checks before broader use.
+From the full source, use Node.js 20+:
 
-## Developer-facing API
+```bash
+npm test
+npm run check
+```
 
-After the `ready` hook, `game.modules.get("player-npc-notes").api` exposes `open(actor)`, `openShared(actor)` and `openPersonal(actor)`. Pass a real world/synthetic Actor object. This optional API is for deliberate macro use; the module does not create macros or modify hotbar slots.
+See [TEST-PLAN.md](TEST-PLAN.md) for the real Foundry test matrix. Passing Node/mock tests does **not** prove live Foundry behavior.
 
-## Source and release
+After Foundry's `ready` hook, `game.modules.get("player-npc-notes").api` exposes `open(actor)`, `openShared(actor)`, `openPersonal(actor)`, `openFromToken(token)` and `openPersonalFromToken(token)`. These are optional direct calls; there is no generated macro or hotbar assignment.
 
-AFT NPC Notes is maintained in [rebsiot/NPC-Notes](https://github.com/rebsiot/NPC-Notes). The repository contains the complete installable ZIP as a versioned artifact and a root-level Foundry manifest. The full module source is included in that archive. This beta has not passed a real GM/player Foundry v14 test.
+**Repository:** https://github.com/rebsiot/NPC-Notes  
+**Manifest:** https://raw.githubusercontent.com/rebsiot/NPC-Notes/main/module.json  
+**Pinned beta ZIP:** https://raw.githubusercontent.com/rebsiot/NPC-Notes/main/releases/player-npc-notes-0.2.0.zip
